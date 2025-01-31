@@ -1,0 +1,14 @@
+[package]
+name = "slang-native-playground"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+env_logger = "0.11.6"
+pollster = "0.4.0"
+slang = { path = "../slang-rs" }
+wgpu = "24.0.1"
+winit = "0.30.8"
+strum = "0.25"
+strum_macros = "0.25"
+bytemuck = "1.21.0"
