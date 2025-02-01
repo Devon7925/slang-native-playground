@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use slang::{reflection::Shader, Downcast, EntryPoint, GlobalSession, SessionDesc};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use wgpu::BindGroupLayoutEntry;
 
 fn is_whole_program_target(compile_target: String) -> bool {
     return compile_target == "METAL" || compile_target == "SPIRV";
@@ -32,6 +33,11 @@ pub struct SlangCompiler {
 struct CompiledEntryPoint {
     module: slang::Module,
     entry_point: slang::EntryPoint,
+}
+
+pub struct CompilationResult {
+    pub out_code: String,
+    pub bindings: HashMap<String, BindGroupLayoutEntry>,
 }
 
 impl SlangCompiler {
@@ -277,7 +283,7 @@ impl SlangCompiler {
     //     return true;
     // }
 
-    pub fn compile(&self, entry_point_name: String) -> HashMap<String, wgpu::BindGroupLayoutEntry> {
+    pub fn compile(&self, entry_point_name: String) -> CompilationResult {
         let search_path = std::ffi::CString::new("shaders").unwrap();
 
         // All compiler options are available through this builder.
@@ -286,7 +292,7 @@ impl SlangCompiler {
             .matrix_layout_row(true);
 
         let target_desc = slang::TargetDesc::default()
-            .format(slang::CompileTarget::Spirv)
+            .format(slang::CompileTarget::Wgsl)
             .profile(self.global_slang_session.find_profile("spirv_1_6"));
 
         let targets = [target_desc];
@@ -313,7 +319,11 @@ impl SlangCompiler {
         let linked_program = program.link().unwrap();
         // let hashed_strings = linked_program.load_strings(); TODO
 
-        let out_code = linked_program.entry_point_code(0 /* entry_point_index */, 0 /* target_index */);
+        let out_code = linked_program.entry_point_code(0 /* entry_point_index */, 0 /* target_index */).unwrap()
+        .as_slice()
+        .to_vec();
+    //convert to string
+        let out_code = String::from_utf8(out_code).unwrap();
 
         let bindings = self.get_resource_bindings(&linked_program);
 
@@ -323,6 +333,9 @@ impl SlangCompiler {
 
         // let reflection_json = linked_program.layout(0).to_json_object(); TODO
 
-        return bindings;
+        return CompilationResult {
+            out_code,
+            bindings,
+        };
     }
 }

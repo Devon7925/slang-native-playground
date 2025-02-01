@@ -2,9 +2,8 @@ mod graphics_pipeline;
 mod compute_pipeline;
 mod slang_compiler;
 
-use slang::Downcast;
 use slang_compiler::SlangCompiler;
-use wgpu::{BufferUsages, TextureFormat};
+use wgpu::TextureFormat;
 
 use std::{borrow::Cow, collections::HashMap, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
@@ -16,61 +15,6 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
-
-fn compile_entrypoints() -> HashMap<String, String> {
-    let global_session = slang::GlobalSession::new().unwrap();
-
-    let search_path = std::ffi::CString::new("shaders").unwrap();
-
-    // All compiler options are available through this builder.
-    let session_options = slang::CompilerOptions::default()
-        .optimization(slang::OptimizationLevel::High)
-        .matrix_layout_row(true);
-
-    let target_desc = slang::TargetDesc::default()
-        .format(slang::CompileTarget::Wgsl)
-        .profile(global_session.find_profile("spirv_1_6"));
-
-    let targets = [target_desc];
-    let search_paths = [search_path.as_ptr()];
-
-    let session_desc = slang::SessionDesc::default()
-        .targets(&targets)
-        .search_paths(&search_paths)
-        .options(&session_options);
-
-    let session = global_session.create_session(&session_desc).unwrap();
-    let module = session.load_module("imageMain.slang").unwrap();
-
-    let count = module.get_defined_entry_point_count();
-    
-    let mut result = HashMap::new();
-    for i in 0..count {
-        let entry_point = module.get_defined_entry_point(i).unwrap();
-
-        let name = entry_point.get_function_reflection().name();
-
-        let program = session
-            .create_composite_component_type(&[
-                module.downcast().clone(),
-                entry_point.downcast().clone(),
-            ])
-            .unwrap();
-
-        let linked_program = program.link().unwrap();
-
-        let code = linked_program
-            .entry_point_code(0, 0)
-            .unwrap()
-            .as_slice()
-            .to_vec();
-        //convert to string
-        let code = String::from_utf8(code).unwrap();
-
-        result.insert(name.to_string(), code);
-    }
-    result
-}
 
 struct State {
     window: Arc<Window>,
@@ -320,7 +264,7 @@ async fn process_resource_commands(
     //
     // Some special-case allocations
     //
-let current_window_size = [300, 150];//TODO
+    let current_window_size = [300, 150];//TODO
 
     safe_set(&mut allocated_resources, "outputTexture".to_string(), GPUResource::Texture(create_output_texture(&pipeline.device, current_window_size[0], current_window_size[1], TextureFormat::Rgba8Unorm)));
 
@@ -379,12 +323,10 @@ impl State {
 
         let device = Arc::new(device);
 
-        let compiled = compile_entrypoints();
-
         let size = window.inner_size();
 
         let compiler = SlangCompiler::new();
-        let ret = compiler.compile("imageMain".to_string());
+        let compilation = compiler.compile("imageMain".to_string());
 
         let surface = instance.create_surface(window.clone()).unwrap();   
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
@@ -400,12 +342,11 @@ impl State {
         pass_through_pipeline.create_pipeline(&shader_module, input_texture);
         pass_through_pipeline.create_bind_group();
 
-        let main_code = compiled.get("imageMain").unwrap().as_str();
         let compute_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("imageMain"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(main_code)),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&compilation.out_code)),
         });
-        main_compute_pipeline.create_pipeline_layout(ret);
+        main_compute_pipeline.create_pipeline_layout(compilation.bindings);
         main_compute_pipeline.create_pipeline(compute_shader_module, &allocated_resources);
 
         let state = State {
