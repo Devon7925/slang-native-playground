@@ -10,11 +10,16 @@ use std::{borrow::Cow, collections::HashMap, sync::Arc, time::{SystemTime, UNIX_
 use compute_pipeline::ComputePipeline;
 use graphics_pipeline::GraphicsPipeline;
 use winit::{
-    application::ApplicationHandler,
-    event::WindowEvent,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowId},
+    application::ApplicationHandler, dpi::PhysicalPosition, event::{ElementState, MouseButton, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::{Window, WindowId}
 };
+
+struct MouseState {
+    last_mouse_clicked_pos: PhysicalPosition<f64>,
+    last_mouse_down_pos: PhysicalPosition<f64>,
+    current_mouse_pos: PhysicalPosition<f64>,
+    mouse_clicked: bool,
+    is_mouse_down: bool,
+}
 
 struct State {
     window: Arc<Window>,
@@ -25,7 +30,8 @@ struct State {
     surface_format: wgpu::TextureFormat,
     pass_through_pipeline: GraphicsPipeline,
     main_compute_pipeline: ComputePipeline,
-    allocated_resources: HashMap<String, GPUResource>
+    allocated_resources: HashMap<String, GPUResource>,
+    mouse_state: MouseState,
 }
 
 fn create_output_texture(device: &wgpu::Device, width: u32, height: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
@@ -359,6 +365,7 @@ impl State {
             pass_through_pipeline,
             main_compute_pipeline,
             allocated_resources,
+            mouse_state: MouseState { last_mouse_clicked_pos: PhysicalPosition::default(), last_mouse_down_pos: PhysicalPosition::default(), current_mouse_pos: PhysicalPosition::default(), mouse_clicked: false, is_mouse_down: false }
         };
 
         // Configure surface for the first time
@@ -422,15 +429,17 @@ impl State {
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
 
-        let mut time_array = [0.0; 8];
-        // time_array[0] = canvasCurrentMousePos.x;
-        // time_array[1] = canvasCurrentMousePos.y;
-        // time_array[2] = canvasLastMouseDownPos.x;
-        // time_array[3] = canvasLastMouseDownPos.y;
-        // if (canvasIsMouseDown)
-        //     time_array[2] = -time_array[2];
-        // if (canvasMouseClicked)
-        //     time_array[3] = -time_array[3];
+        let mut time_array = [0.0f32; 8];
+        time_array[0] = self.mouse_state.last_mouse_down_pos.x as f32;
+        time_array[1] = self.mouse_state.last_mouse_down_pos.y as f32;
+        time_array[2] = self.mouse_state.last_mouse_clicked_pos.x as f32;
+        time_array[3] = self.mouse_state.last_mouse_clicked_pos.y as f32;
+        if self.mouse_state.is_mouse_down {
+            time_array[2] = -time_array[2];
+        }
+        if self.mouse_state.mouse_clicked {
+            time_array[3] = -time_array[3];
+        }
         time_array[4] = since_the_epoch.as_millis() as u16 as f32 * 0.001;
         let Some(GPUResource::Buffer(uniform_input)) = self.allocated_resources.get("uniformInput") else {
             panic!("uniformInput doesn't exist or is of incorrect type");
@@ -467,6 +476,23 @@ impl State {
         // Submit the command in the queue to execute
         self.queue.submit([encoder.finish()]);
         surface_texture.present();
+    }
+
+    fn mousedown(&mut self) {
+        self.mouse_state.last_mouse_clicked_pos = self.mouse_state.current_mouse_pos;
+        self.mouse_state.mouse_clicked = true;
+        self.mouse_state.is_mouse_down = true;
+    }
+    
+    fn mousemove(&mut self, position: PhysicalPosition<f64>) {
+        self.mouse_state.current_mouse_pos = position;
+        if self.mouse_state.is_mouse_down {
+            self.mouse_state.last_mouse_down_pos = position;
+        }
+    }
+    
+    fn mouseup(&mut self) {
+        self.mouse_state.is_mouse_down = false;
     }
 }
 
@@ -506,6 +532,18 @@ impl ApplicationHandler for App {
                 // Reconfigures the size of the surface. We do not re-render
                 // here as this event is always folloed up by redraw request.
                 state.resize(size);
+            }
+            WindowEvent::CursorMoved { device_id: _, position } => {
+                state.mousemove(position);
+            }
+            WindowEvent::MouseInput { device_id: _, state: mouse_state, button } => {
+                if button == MouseButton::Left {
+                    if mouse_state == ElementState::Pressed {
+                        state.mousedown();
+                    } else {
+                        state.mouseup();
+                    }
+                }
             }
             _ => (),
         }
