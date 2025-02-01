@@ -1559,6 +1559,7 @@ dependencies = [
  "bytemuck",
  "env_logger",
  "pollster",
+ "regex",
  "slang",
  "strum 0.25.0",
  "strum_macros 0.25.3",

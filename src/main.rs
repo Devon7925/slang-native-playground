@@ -2,7 +2,7 @@ mod graphics_pipeline;
 mod compute_pipeline;
 mod slang_compiler;
 
-use slang_compiler::SlangCompiler;
+use slang_compiler::{CallCommand, ResourceCommand, ResourceCommandData, SlangCompiler};
 use wgpu::TextureFormat;
 
 use std::{borrow::Cow, collections::HashMap, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
@@ -29,7 +29,8 @@ struct State {
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
     pass_through_pipeline: GraphicsPipeline,
-    main_compute_pipeline: ComputePipeline,
+    compute_pipelines: HashMap<String, ComputePipeline>,
+    call_commands: Vec<CallCommand>,
     allocated_resources: HashMap<String, GPUResource>,
     mouse_state: MouseState,
 }
@@ -77,51 +78,60 @@ fn safe_set<K: Into<String>>(map: &mut HashMap<String, GPUResource>, key: K, val
 const PRINTF_BUFFER_ELEMENT_SIZE: u64 = 12;
 const PRINTF_BUFFER_SIZE: u64 = PRINTF_BUFFER_ELEMENT_SIZE * 2048; // 12 bytes per printf struct
 async fn process_resource_commands(
-    pipeline: &ComputePipeline,
-    // resource_bindings: Bindings,
-    // resource_commands: ResourceCommand[]
+    queue: &wgpu::Queue,
+    device: &wgpu::Device,
+    resource_bindings: &HashMap<String, wgpu::BindGroupLayoutEntry>,
+    resource_commands: Vec<ResourceCommand>,
 ) -> HashMap<String, GPUResource> {
     let mut allocated_resources: HashMap<String, GPUResource> = HashMap::new();
 
-    // for (const { resourceName, parsedCommand } of resourceCommands) {
-    //     if (parsedCommand.type === "ZEROS") {
-    //         const elementSize = parsedCommand.elementSize;
-    //         const bindingInfo = resourceBindings.get(resourceName);
+    for ResourceCommand { resource_name, command_data } in resource_commands {
+        match command_data {
+            ResourceCommandData::ZEROS{
+                count,
+                element_size,
+            } => {
+                let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                    panic!("Resource ${resource_name} is not defined in the bindings.");
+                };
+
+                if !matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
+                    panic!("Resource ${resource_name} is an invalid type for ZEROS");
+                }
+
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    mapped_at_creation: false,
+                    size: (count * element_size) as u64,
+                    usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_DST),
+                });
+
+                // Initialize the buffer with zeros.
+                let zeros = vec![0u8; (count * element_size) as usize];
+                queue.write_buffer(&buffer, 0, &zeros);
+
+                safe_set(&mut allocated_resources, resource_name, GPUResource::Buffer(buffer));
+            }
+            _ => {}
+        }
+    }
+    //          else if (parsedCommand.type === "BLACK") {
+    //         let size = parsedCommand.width * parsedCommand.height;
+    //         let elementSize = 4; // Assuming 4 bytes per element (e.g., float) TODO: infer from type.
+    //         let bindingInfo = resourceBindings.get(resourceName);
     //         if (!bindingInfo) {
-    //             throw new Error(`Resource ${resourceName} is not defined in the bindings.`);
-    //         }
-
-    //         if (!bindingInfo.buffer) {
-    //             throw new Error(`Resource ${resourceName} is an invalid type for ZEROS`);
-    //         }
-
-    //         const buffer = pipeline.device.createBuffer({
-    //             size: parsedCommand.count * elementSize,
-    //             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    //         });
-
-    //         safeSet(allocatedResources, resourceName, buffer);
-
-    //         // Initialize the buffer with zeros.
-    //         let zeros: BufferSource = new Uint8Array(parsedCommand.count * elementSize);
-    //         pipeline.device.queue.writeBuffer(buffer, 0, zeros);
-    //     } else if (parsedCommand.type === "BLACK") {
-    //         const size = parsedCommand.width * parsedCommand.height;
-    //         const elementSize = 4; // Assuming 4 bytes per element (e.g., float) TODO: infer from type.
-    //         const bindingInfo = resourceBindings.get(resourceName);
-    //         if (!bindingInfo) {
-    //             throw new Error(`Resource ${resourceName} is not defined in the bindings.`);
+    //             panic!("Resource ${resourceName} is not defined in the bindings.");
     //         }
 
     //         if (!bindingInfo.texture && !bindingInfo.storageTexture) {
-    //             throw new Error(`Resource ${resourceName} is an invalid type for BLACK`);
+    //             panic!("Resource ${resourceName} is an invalid type for BLACK");
     //         }
     //         try {
     //             let usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT;
     //             if (bindingInfo.storageTexture) {
     //                 usage |= GPUTextureUsage.STORAGE_BINDING;
     //             }
-    //             const texture = pipeline.device.createTexture({
+    //             let texture = device.createTexture({
     //                 size: [parsedCommand.width, parsedCommand.height],
     //                 format: bindingInfo.storageTexture ? 'r32float' : 'rgba8unorm',
     //                 usage: usage,
@@ -131,24 +141,24 @@ async fn process_resource_commands(
 
     //             // Initialize the texture with zeros.
     //             let zeros = new Uint8Array(Array(size * elementSize).fill(0));
-    //             pipeline.device.queue.writeTexture({ texture }, zeros, { bytesPerRow: parsedCommand.width * elementSize }, { width: parsedCommand.width, height: parsedCommand.height });
+    //             device.queue.writeTexture({ texture }, zeros, { bytesPerRow: parsedCommand.width * elementSize }, { width: parsedCommand.width, height: parsedCommand.height });
     //         }
     //         catch (error) {
-    //             throw new Error(`Failed to create texture: ${error}`);
+    //             panic!("Failed to create texture: ${error}");
     //         }
     //     } else if (parsedCommand.type === "URL") {
     //         // Load image from URL and wait for it to be ready.
-    //         const bindingInfo = resourceBindings.get(resourceName);
+    //         let bindingInfo = resourceBindings.get(resourceName);
 
     //         if (!bindingInfo) {
-    //             throw new Error(`Resource ${resourceName} is not defined in the bindings.`);
+    //             panic!("Resource ${resourceName} is not defined in the bindings.");
     //         }
 
     //         if (!bindingInfo.texture) {
-    //             throw new Error(`Resource ${resourceName} is not a texture.`);
+    //             panic!("Resource ${resourceName} is not a texture.");
     //         }
 
-    //         const image = new Image();
+    //         let image = new Image();
     //         try {
     //             // TODO: Pop-up a warning if the image is not CORS-enabled.
     //             // TODO: Pop-up a warning for the user to confirm that its okay to load a cross-origin image (i.e. do you trust this code..)
@@ -159,34 +169,34 @@ async fn process_resource_commands(
     //             await image.decode();
     //         }
     //         catch (error) {
-    //             throw new Error(`Failed to load & decode image from URL: ${parsedCommand.url}`);
+    //             panic!("Failed to load & decode image from URL: ${parsedCommand.url}");
     //         }
 
     //         try {
-    //             const imageBitmap = await createImageBitmap(image);
-    //             const texture = pipeline.device.createTexture({
+    //             let imageBitmap = await createImageBitmap(image);
+    //             let texture = device.createTexture({
     //                 size: [imageBitmap.width, imageBitmap.height],
     //                 format: 'rgba8unorm',
     //                 usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     //             });
-    //             pipeline.device.queue.copyExternalImageToTexture({ source: imageBitmap }, { texture: texture }, [imageBitmap.width, imageBitmap.height]);
+    //             device.queue.copyExternalImageToTexture({ source: imageBitmap }, { texture: texture }, [imageBitmap.width, imageBitmap.height]);
     //             safeSet(allocatedResources, resourceName, texture);
     //         }
     //         catch (error) {
-    //             throw new Error(`Failed to create texture from image: ${error}`);
+    //             panic!("Failed to create texture from image: ${error}");
     //         }
     //     } else if (parsedCommand.type === "RAND") {
-    //         const elementSize = 4; // RAND is only valid for floats
-    //         const bindingInfo = resourceBindings.get(resourceName);
+    //         let elementSize = 4; // RAND is only valid for floats
+    //         let bindingInfo = resourceBindings.get(resourceName);
     //         if (!bindingInfo) {
-    //             throw new Error(`Resource ${resourceName} is not defined in the bindings.`);
+    //             panic!("Resource ${resourceName} is not defined in the bindings.");
     //         }
 
     //         if (!bindingInfo.buffer) {
-    //             throw new Error(`Resource ${resourceName} is not defined as a buffer.`);
+    //             panic!("Resource ${resourceName} is not defined as a buffer.");
     //         }
 
-    //         const buffer = pipeline.device.createBuffer({
+    //         let buffer = device.createBuffer({
     //             size: parsedCommand.count * elementSize,
     //             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     //         });
@@ -195,20 +205,20 @@ async fn process_resource_commands(
 
     //         // Place a call to a shader that fills the buffer with random numbers.
     //         if (!randFloatPipeline) {
-    //             const randomPipeline = new ComputePipeline(pipeline.device);
+    //             let randomPipeline = new ComputePipeline(device);
 
     //             // Load randFloat shader code from the file.
-    //             const randFloatShaderCode = await (await fetch('demos/rand_float.slang')).text();
+    //             let randFloatShaderCode = await (await fetch('demos/rand_float.slang')).text();
     //             if (compiler == null) {
-    //                 throw new Error("Compiler is not defined!");
+    //                 panic!("Compiler is not defined!");
     //             }
-    //             const compiledResult = compiler.compile(randFloatShaderCode, "computeMain", "WGSL");
+    //             let compiledResult = compiler.compile(randFloatShaderCode, "computeMain", "WGSL");
     //             if (!compiledResult) {
-    //                 throw new Error("[Internal] Failed to compile randFloat shader");
+    //                 panic!("[Internal] Failed to compile randFloat shader");
     //             }
 
     //             let [code, layout, hashedStrings] = compiledResult;
-    //             const module = pipeline.device.createShaderModule({ code: code });
+    //             let module = device.createShaderModule({ code: code });
 
     //             randomPipeline.createPipelineLayout(layout);
 
@@ -220,8 +230,8 @@ async fn process_resource_commands(
 
     //         // Dispatch a random number generation shader.
     //         {
-    //             const randomPipeline = randFloatPipeline;
-
+    //             let randomPipeline = randFloatPipeline;
+  
     //             // Alloc resources for the shader.
     //             if (!randFloatResources)
     //                 randFloatResources = new Map();
@@ -230,40 +240,40 @@ async fn process_resource_commands(
 
     //             if (!randFloatResources.has("seed"))
     //                 randFloatResources.set("seed",
-    //                     pipeline.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
+    //                     device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
 
-    //             const seedBuffer = randFloatResources.get("seed") as GPUBuffer;
+    //             let seedBuffer = randFloatResources.get("seed") as GPUBuffer;
 
     //             // Set bindings on the pipeline.
     //             randFloatPipeline.createBindGroup(randFloatResources);
 
-    //             const seedValue = new Float32Array([Math.random(), 0, 0, 0]);
-    //             pipeline.device.queue.writeBuffer(seedBuffer, 0, seedValue);
+    //             let seedValue = new Float32Array([Math.random(), 0, 0, 0]);
+    //             device.queue.writeBuffer(seedBuffer, 0, seedValue);
 
     //             // Encode commands to do the computation
-    //             const encoder = pipeline.device.createCommandEncoder({ label: 'compute builtin encoder' });
-    //             const pass = encoder.beginComputePass({ label: 'compute builtin pass' });
+    //             let encoder = device.createCommandEncoder({ label: 'compute builtin encoder' });
+    //             let pass = encoder.beginComputePass({ label: 'compute builtin pass' });
 
     //             pass.setBindGroup(0, randomPipeline.bindGroup || null);
 
     //             if (randomPipeline.pipeline == undefined) {
-    //                 throw new Error("Random pipeline is undefined");
+    //                 panic!("Random pipeline is undefined");
     //             }
     //             pass.setPipeline(randomPipeline.pipeline);
 
-    //             const workGroupSizeX = Math.floor((parsedCommand.count + 63) / 64);
+    //             let workGroupSizeX = Math.floor((parsedCommand.count + 63) / 64);
     //             pass.dispatchWorkgroups(workGroupSizeX, 1);
     //             pass.end();
 
     //             // Finish encoding and submit the commands
-    //             const commandBuffer = encoder.finish();
-    //             pipeline.device.queue.submit([commandBuffer]);
-    //             await pipeline.device.queue.onSubmittedWorkDone();
+    //             let commandBuffer = encoder.finish();
+    //             device.queue.submit([commandBuffer]);
+    //             await device.queue.onSubmittedWorkDone();
     //         }
     //     } else {
     //         // exhaustiveness check
     //         let x: never = parsedCommand;
-    //         throw new Error("Invalid resource command type");
+    //         panic!("Invalid resource command type");
     //     }
     // }
 
@@ -272,37 +282,37 @@ async fn process_resource_commands(
     //
     let current_window_size = [300, 150];//TODO
 
-    safe_set(&mut allocated_resources, "outputTexture".to_string(), GPUResource::Texture(create_output_texture(&pipeline.device, current_window_size[0], current_window_size[1], TextureFormat::Rgba8Unorm)));
+    safe_set(&mut allocated_resources, "outputTexture".to_string(), GPUResource::Texture(create_output_texture(&device, current_window_size[0], current_window_size[1], TextureFormat::Rgba8Unorm)));
 
-    safe_set(&mut allocated_resources, "outputBuffer".to_string(), GPUResource::Buffer(pipeline.device.create_buffer(&wgpu::BufferDescriptor {
+    safe_set(&mut allocated_resources, "outputBuffer".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         mapped_at_creation: false,
         size: 2 * 2 * 4,
         usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_SRC),
     })));
 
-    safe_set(&mut allocated_resources, "outputBufferRead".to_string(), GPUResource::Buffer(pipeline.device.create_buffer(&wgpu::BufferDescriptor {
+    safe_set(&mut allocated_resources, "outputBufferRead".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         mapped_at_creation: false,
         size: 2 * 2 * 4,
         usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
     })));
 
-    safe_set(&mut allocated_resources, "g_printedBuffer".to_string(), GPUResource::Buffer(pipeline.device.create_buffer(&wgpu::BufferDescriptor {
+    safe_set(&mut allocated_resources, "g_printedBuffer".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         mapped_at_creation: false,
         size: PRINTF_BUFFER_SIZE,
         usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_SRC),
     })));
 
-    safe_set(&mut allocated_resources, "printfBufferRead".to_string(), GPUResource::Buffer(pipeline.device.create_buffer(&wgpu::BufferDescriptor {
+    safe_set(&mut allocated_resources, "printfBufferRead".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         mapped_at_creation: false,
         size: PRINTF_BUFFER_SIZE,
         usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
     })));
 
-    safe_set(&mut allocated_resources, "uniformInput".to_string(), GPUResource::Buffer(pipeline.device.create_buffer(&wgpu::BufferDescriptor {
+    safe_set(&mut allocated_resources, "uniformInput".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         mapped_at_creation: false,
         size: 8*4,//TODO
@@ -337,8 +347,7 @@ impl State {
         let surface = instance.create_surface(window.clone()).unwrap();   
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
 
-        let mut main_compute_pipeline = ComputePipeline::new(device.clone());
-        let allocated_resources = process_resource_commands(&main_compute_pipeline).await;
+        let allocated_resources = process_resource_commands(&queue, &device, &compilation.bindings, compilation.resource_commands).await;
 
         let mut pass_through_pipeline = GraphicsPipeline::new(device.clone());
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("passThrough.wgsl"));
@@ -348,12 +357,18 @@ impl State {
         pass_through_pipeline.create_pipeline(&shader_module, input_texture);
         pass_through_pipeline.create_bind_group();
 
-        let compute_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("imageMain"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&compilation.out_code)),
-        });
-        main_compute_pipeline.create_pipeline_layout(compilation.bindings);
-        main_compute_pipeline.create_pipeline(compute_shader_module, &allocated_resources);
+        let mut compute_pipelines = HashMap::new();
+
+        for (shader_name, shader_code) in compilation.out_code {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(shader_name.as_str()),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_code.as_str())),
+            });
+            let mut pipeline = ComputePipeline::new(device.clone());
+            pipeline.create_pipeline_layout(compilation.bindings.clone());
+            pipeline.create_pipeline(module, &allocated_resources);
+            compute_pipelines.insert(shader_name, pipeline);
+        }
 
         let state = State {
             window,
@@ -363,7 +378,8 @@ impl State {
             surface,
             surface_format,
             pass_through_pipeline,
-            main_compute_pipeline,
+            compute_pipelines,
+            call_commands: compilation.call_commands,
             allocated_resources,
             mouse_state: MouseState { last_mouse_clicked_pos: PhysicalPosition::default(), last_mouse_down_pos: PhysicalPosition::default(), current_mouse_pos: PhysicalPosition::default(), mouse_clicked: false, is_mouse_down: false }
         };
@@ -400,7 +416,9 @@ impl State {
         self.configure_surface();
 
         safe_set(&mut self.allocated_resources, "outputTexture", GPUResource::Texture(create_output_texture(&self.device, new_size.width, new_size.height, wgpu::TextureFormat::Rgba8Unorm)));
-        self.main_compute_pipeline.create_bind_group(&self.allocated_resources);
+        for (_, compute_pipeline) in self.compute_pipelines.iter_mut() {
+            compute_pipeline.create_bind_group(&self.allocated_resources);
+        }
     
         let Some(GPUResource::Texture(in_tex)) = self.allocated_resources.get("outputTexture") else {
             panic!();
@@ -448,13 +466,62 @@ impl State {
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
+        for call_command in self.call_commands.iter() {
+            let pipeline = self.compute_pipelines.get(call_command.function.as_str()).unwrap();
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Compute builtin pass"),
+                timestamp_writes: None,
+            });
+
+            pass.set_bind_group(0, pipeline.bind_group.as_ref(), &[]);
+            pass.set_pipeline(pipeline.pipeline.as_ref().unwrap());
+
+            let size: [u32; 3] = match &call_command.parameters {
+                slang_compiler::CallCommandParameters::ResourceBased(resource_name, element_size) => {
+                    let resource = self.allocated_resources.get(resource_name).unwrap();
+                    match resource {
+                        GPUResource::Texture(texture) => {
+                            [texture.width(), texture.height(), 1]
+                        },
+                        GPUResource::Buffer(buffer) => {
+                            [buffer.size() as u32 / element_size.unwrap_or(4), 1, 1]
+                        },
+                    }
+                },
+                slang_compiler::CallCommandParameters::FixedSize(items) => {
+                    if items.len() > 3 {
+                        panic!("Too many parameters for call command");
+                    }
+                    let mut size = [1; 3];
+                    for (i, n) in items.iter().enumerate() {
+                        size[i] = *n;
+                    }
+                    size
+                },
+            };
+
+            //TODO
+            let block_size_x = 64;
+            let block_size_y = 1;
+            let block_size_z = 1;
+    
+
+            let work_group_size_x = (size[0] + block_size_x - 1) / block_size_x;
+            let work_group_size_y = (size[1] + block_size_y - 1) / block_size_y;
+            let work_group_size_z = (size[2] + block_size_z - 1) / block_size_z;
+            pass.dispatch_workgroups(work_group_size_x, work_group_size_y, work_group_size_z);
+            drop(pass);
+        }
+
+        let main_compute_pipeline = self.compute_pipelines.get("imageMain").unwrap();
+
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Compute builtin pass"),
             timestamp_writes: None,
         });
 
-        pass.set_bind_group(0, self.main_compute_pipeline.bind_group.as_ref(), &[]);
-        pass.set_pipeline(self.main_compute_pipeline.pipeline.as_ref().unwrap());
+        pass.set_bind_group(0, main_compute_pipeline.bind_group.as_ref(), &[]);
+        pass.set_pipeline(main_compute_pipeline.pipeline.as_ref().unwrap());
 
         let work_group_size_x = (surface_texture.texture.width() + 15) / 16;
         let work_group_size_y = (surface_texture.texture.height() + 15) / 16;

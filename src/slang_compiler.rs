@@ -1,6 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fs};
 
-use slang::{reflection::Shader, Downcast, EntryPoint, GlobalSession, SessionDesc};
+use regex::Regex;
+use slang::{
+    reflection::Shader, Downcast, EntryPoint, GlobalSession, ResourceShape, ScalarType,
+    SessionDesc, TypeKind,
+};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use wgpu::BindGroupLayoutEntry;
@@ -26,7 +30,6 @@ impl ShaderType {
 
 pub struct SlangCompiler {
     global_slang_session: GlobalSession,
-
     // compile_target_map: { name: string, value: number }[] | null,
 }
 
@@ -35,9 +38,23 @@ struct CompiledEntryPoint {
     entry_point: slang::EntryPoint,
 }
 
+pub enum ResourceCommandData {
+    ZEROS { count: u32, element_size: u32 },
+    RAND(u32),
+    BLACK(u32, u32),
+    URL(String),
+}
+
+pub struct ResourceCommand {
+    pub resource_name: String,
+    pub command_data: ResourceCommandData,
+}
+
 pub struct CompilationResult {
-    pub out_code: String,
+    pub out_code: HashMap<String, String>,
     pub bindings: HashMap<String, BindGroupLayoutEntry>,
+    pub resource_commands: Vec<ResourceCommand>,
+    pub call_commands: Vec<CallCommand>,
 }
 
 impl SlangCompiler {
@@ -66,7 +83,12 @@ impl SlangCompiler {
         return None;
     }
 
-    fn find_entry_point(&self, module: &slang::Module, entry_point_name: Option<&String>, stage: u32) -> Option<EntryPoint> {
+    fn find_entry_point(
+        &self,
+        module: &slang::Module,
+        entry_point_name: Option<&String>,
+        stage: u32,
+    ) -> Option<EntryPoint> {
         if entry_point_name.clone().map(|ep| ep == "").unwrap_or(true) {
             let entry_point = self.find_runnable_entry_point(module);
             if entry_point.is_none() {
@@ -75,8 +97,7 @@ impl SlangCompiler {
                 // TODO
             }
             return entry_point;
-        }
-        else {
+        } else {
             let entry_point = module.find_entry_point_by_name(entry_point_name.unwrap().as_str());
             if entry_point.is_none() {
                 // let error = slang::get_last_error();
@@ -117,12 +138,27 @@ impl SlangCompiler {
         let Some(slang_session) = self.global_slang_session.create_session(&session_desc) else {
             return vec![];
         };
-        let module = slang_session.load_module("imageMain.slang").unwrap();
+        let module = slang_session.load_module("user.slang").unwrap();
 
         let count = module.get_defined_entry_point_count();
         for i in 0..count {
             let entry_point = module.get_defined_entry_point(i).unwrap();
             result.push(entry_point.get_function_reflection().name().to_string());
+        }
+
+        let program = slang_session
+            .create_composite_component_type(&[module.downcast().clone()])
+            .unwrap();
+        let linked_program = program.link().unwrap();
+        let shader_reflection = linked_program.layout(0).unwrap();
+
+        for st in ShaderType::iter().map(|st| st.get_entry_point_name().to_string()) {
+            if shader_reflection
+                .find_function_by_name(st.as_str())
+                .is_some()
+            {
+                result.push(st);
+            }
         }
 
         return result;
@@ -135,19 +171,33 @@ impl SlangCompiler {
     // Since we will not let user to change the entry point code, we can precompile the entry point module
     // and reuse it for every compilation.
 
-    fn compile_entry_point_module(&self, slang_session: &slang::Session, module_name: &String) -> Result<CompiledEntryPoint, slang::Error> {
+    fn compile_entry_point_module(
+        &self,
+        slang_session: &slang::Session,
+        module_name: &String,
+    ) -> Result<CompiledEntryPoint, slang::Error> {
         let module = slang_session.load_module(&module_name)?;
 
         // we use the same entry point name as module name
-        let Some(entry_point) = self.find_entry_point(&module, Some(module_name), SlangCompiler::SLANG_STAGE_COMPUTE) else {
+        let Some(entry_point) = self.find_entry_point(
+            &module,
+            Some(module_name),
+            SlangCompiler::SLANG_STAGE_COMPUTE,
+        ) else {
             panic!(); //TODO
         };
 
-        return Ok(CompiledEntryPoint { module, entry_point });
-
+        return Ok(CompiledEntryPoint {
+            module,
+            entry_point,
+        });
     }
 
-    fn get_precompiled_program(&self, slang_session: &slang::Session, module_name: &String) -> Option<CompiledEntryPoint> {
+    fn get_precompiled_program(
+        &self,
+        slang_session: &slang::Session,
+        module_name: &String,
+    ) -> Option<CompiledEntryPoint> {
         if !SlangCompiler::is_runnable_entry_point(&module_name) {
             return None;
         }
@@ -157,11 +207,22 @@ impl SlangCompiler {
         return Some(main_module.unwrap());
     }
 
-    fn add_active_entry_points(&self, slang_session: &slang::Session, entry_point_name: &String, user_module: slang::Module, component_list: &mut Vec<slang::ComponentType>) -> bool {
+    fn add_active_entry_points(
+        &self,
+        slang_session: &slang::Session,
+        entry_point_name: &String,
+        user_module: slang::Module,
+        component_list: &mut Vec<slang::ComponentType>,
+    ) -> bool {
         // For now, we just don't allow user to define image_main or print_main as entry point name for simplicity
         let count = user_module.get_defined_entry_point_count();
         for i in 0..count {
-            let name = user_module.get_defined_entry_point(i).unwrap().get_function_reflection().name().to_string();
+            let name = user_module
+                .get_defined_entry_point(i)
+                .unwrap()
+                .get_function_reflection()
+                .name()
+                .to_string();
             if SlangCompiler::is_runnable_entry_point(&name) {
                 // self.diagnostics_msg += "error: Entry point name ${name} is reserved";
                 // TODO
@@ -174,16 +235,21 @@ impl SlangCompiler {
         if entry_point_name != "" {
             if SlangCompiler::is_runnable_entry_point(&entry_point_name) {
                 // we use the same entry point name as module name
-                let Some(main_program) = self.get_precompiled_program(&slang_session, entry_point_name) else {
+                let Some(main_program) =
+                    self.get_precompiled_program(&slang_session, entry_point_name)
+                else {
                     return false;
                 };
 
                 component_list.push(main_program.module.downcast().clone());
                 component_list.push(main_program.entry_point.downcast().clone());
-            }
-            else {
+            } else {
                 // we know the entry point is from user module
-                let Some(entry_point) = self.find_entry_point(&user_module, Some(entry_point_name), SlangCompiler::SLANG_STAGE_COMPUTE) else {
+                let Some(entry_point) = self.find_entry_point(
+                    &user_module,
+                    Some(entry_point_name),
+                    SlangCompiler::SLANG_STAGE_COMPUTE,
+                ) else {
                     return false;
                 };
 
@@ -196,15 +262,19 @@ impl SlangCompiler {
             let results = self.find_defined_entry_points();
             for result in results {
                 if SlangCompiler::is_runnable_entry_point(&result) {
-                    let Some(main_program) = self.get_precompiled_program(&slang_session, &result) else {
+                    let Some(main_program) = self.get_precompiled_program(&slang_session, &result)
+                    else {
                         return false;
                     };
                     component_list.push(main_program.module.downcast().clone());
                     component_list.push(main_program.entry_point.downcast().clone());
                     return true;
-                }
-                else {
-                    let Some(entry_point) = self.find_entry_point(&user_module, Some(&result), SlangCompiler::SLANG_STAGE_COMPUTE) else {
+                } else {
+                    let Some(entry_point) = self.find_entry_point(
+                        &user_module,
+                        Some(&result),
+                        SlangCompiler::SLANG_STAGE_COMPUTE,
+                    ) else {
                         return false;
                     };
 
@@ -215,14 +285,23 @@ impl SlangCompiler {
         return true;
     }
 
-    fn get_binding_descriptor(&self, index: u32, program_reflection: &Shader, parameter: &slang::reflection::VariableLayout) -> Option<wgpu::BindingType> {
+    fn get_binding_descriptor(
+        &self,
+        index: u32,
+        program_reflection: &Shader,
+        parameter: &slang::reflection::VariableLayout,
+    ) -> Option<wgpu::BindingType> {
         let global_layout = program_reflection.global_params_type_layout();
 
         let binding_type = global_layout.descriptor_set_descriptor_range_type(0, index as i64);
 
         // Special case.. TODO: Remove this as soon as the reflection API properly reports write-only textures.
         if parameter.variable().name().unwrap() == "outputTexture" {
-            return Some(wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::Rgba8Unorm, view_dimension: wgpu::TextureViewDimension::D2 });
+            return Some(wgpu::BindingType::StorageTexture {
+                access: wgpu::StorageTextureAccess::WriteOnly,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                view_dimension: wgpu::TextureViewDimension::D2,
+            });
         }
 
         match binding_type {
@@ -231,23 +310,31 @@ impl SlangCompiler {
                 sample_type: wgpu::TextureSampleType::Float { filterable: false },
                 view_dimension: wgpu::TextureViewDimension::D2,
             }),
-            slang::BindingType::MutableTeture => Some(wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::ReadWrite, format: wgpu::TextureFormat::R32Float, view_dimension: wgpu::TextureViewDimension::D2 }),
+            slang::BindingType::MutableTeture => Some(wgpu::BindingType::StorageTexture {
+                access: wgpu::StorageTextureAccess::ReadWrite,
+                format: wgpu::TextureFormat::R32Float,
+                view_dimension: wgpu::TextureViewDimension::D2,
+            }),
             slang::BindingType::ConstantBuffer => Some(wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
                 min_binding_size: None,
             }),
-            slang::BindingType::MutableTypedBuffer
-            | slang::BindingType::MutableRawBuffer => Some(wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            }),
+            slang::BindingType::MutableTypedBuffer | slang::BindingType::MutableRawBuffer => {
+                Some(wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                })
+            }
             _ => None,
         }
     }
 
-    fn get_resource_bindings(&self, linked_program: &slang::ComponentType) -> HashMap<String, wgpu::BindGroupLayoutEntry> {
+    fn get_resource_bindings(
+        &self,
+        linked_program: &slang::ComponentType,
+    ) -> HashMap<String, wgpu::BindGroupLayoutEntry> {
         let reflection = linked_program.layout(0).unwrap(); // assume target-index = 0
 
         let count = reflection.parameter_count();
@@ -257,7 +344,8 @@ impl SlangCompiler {
             let parameter = reflection.parameter_by_index(i).unwrap();
             let name = parameter.variable().name().unwrap().to_string();
 
-            let resource_info = self.get_binding_descriptor(parameter.binding_index(), reflection, parameter);
+            let resource_info =
+                self.get_binding_descriptor(parameter.binding_index(), reflection, parameter);
             let binding = wgpu::BindGroupLayoutEntry {
                 ty: resource_info.unwrap(),
                 binding: parameter.binding_index(),
@@ -282,6 +370,115 @@ impl SlangCompiler {
     //     component_type_list.push(module);
     //     return true;
     // }
+
+    fn resource_commands_from_attributes(
+        &self,
+        shader_reflection: &Shader,
+    ) -> Vec<ResourceCommand> {
+        let mut commands: Vec<ResourceCommand> = vec![];
+
+        for parameter in shader_reflection.parameters() {
+            for attribute in parameter.variable().user_attributes() {
+                let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
+                else {
+                    continue;
+                };
+                let command = if playground_attribute_name == "ZEROS" {
+                    if parameter.ty().kind() != TypeKind::Resource
+                        || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
+                    {
+                        panic!(
+                            "ZEROS attribute cannot be applied to {}, it only supports buffers",
+                            parameter.semantic_name().unwrap()
+                        )
+                    }
+                    let count = attribute.argument_value_int(0).unwrap();
+                    if count < 0 {
+                        panic!(
+                            "ZEROS count for {} cannot have negative size",
+                            parameter.semantic_name().unwrap()
+                        )
+                    }
+                    Some(ResourceCommandData::ZEROS {
+                        count: count as u32,
+                        element_size: get_size(parameter.ty().resource_result_type()),
+                    })
+                } else if playground_attribute_name == "RAND" {
+                    if parameter.ty().kind() != TypeKind::Resource
+                        || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
+                    {
+                        panic!(
+                            "RAND attribute cannot be applied to {}, it only supports buffers",
+                            parameter.semantic_name().unwrap()
+                        )
+                    }
+                    if parameter.ty().resource_result_type().kind() != TypeKind::Scalar
+                        || parameter.ty().resource_result_type().scalar_type()
+                            != ScalarType::Float32
+                    {
+                        panic!("RAND attribute cannot be applied to {}, it only supports float buffers", parameter.semantic_name().unwrap())
+                    }
+                    let count = attribute.argument_value_int(0).unwrap();
+                    if count < 0 {
+                        panic!(
+                            "RAND count for {} cannot have negative size",
+                            parameter.semantic_name().unwrap()
+                        )
+                    }
+                    Some(ResourceCommandData::RAND(count as u32))
+                } else if playground_attribute_name == "BLACK" {
+                    if parameter.ty().kind() != TypeKind::Resource
+                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
+                    {
+                        panic!(
+                            "BLACK attribute cannot be applied to {}, it only supports 2D textures",
+                            parameter.semantic_name().unwrap()
+                        )
+                    }
+
+                    let width = attribute.argument_value_int(0).unwrap();
+                    let height = attribute.argument_value_int(1).unwrap();
+                    if width < 0 {
+                        panic!(
+                            "BLACK width for {} cannot have negative size",
+                            parameter.semantic_name().unwrap()
+                        )
+                    }
+                    if height < 0 {
+                        panic!(
+                            "BLACK height for {} cannot have negative size",
+                            parameter.semantic_name().unwrap()
+                        )
+                    }
+
+                    Some(ResourceCommandData::BLACK(width as u32, height as u32))
+                } else if playground_attribute_name == "URL" {
+                    if parameter.ty().kind() != TypeKind::Resource
+                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
+                    {
+                        panic!(
+                            "URL attribute cannot be applied to {}, it only supports 2D textures",
+                            parameter.semantic_name().unwrap()
+                        )
+                    }
+                    Some(ResourceCommandData::URL(
+                        attribute.argument_value_string(0).unwrap().to_string(),
+                    ))
+                } else {
+                    None
+                };
+
+                if let Some(command) = command {
+                    commands.push(ResourceCommand {
+                        resource_name: parameter.variable().name().unwrap().to_string(),
+                        command_data: command,
+                    });
+                }
+            }
+        }
+
+        return commands;
+    }
 
     pub fn compile(&self, entry_point_name: String) -> CompilationResult {
         let search_path = std::ffi::CString::new("shaders").unwrap();
@@ -314,28 +511,146 @@ impl SlangCompiler {
         let mut components: Vec<slang::ComponentType> = vec![];
 
         let user_module = slang_session.load_module("user.slang").unwrap();
-        self.add_active_entry_points(&slang_session, &entry_point_name,  user_module, &mut components);
-        let program = slang_session.create_composite_component_type(components.as_slice()).unwrap();
+        let user_source = fs::read_to_string(user_module.file_path()).unwrap();
+        self.add_active_entry_points(
+            &slang_session,
+            &"".to_string(),
+            user_module,
+            &mut components,
+        );
+        let program = slang_session
+            .create_composite_component_type(components.as_slice())
+            .unwrap();
         let linked_program = program.link().unwrap();
         // let hashed_strings = linked_program.load_strings(); TODO
-
-        let out_code = linked_program.entry_point_code(0 /* entry_point_index */, 0 /* target_index */).unwrap()
-        .as_slice()
-        .to_vec();
-    //convert to string
-        let out_code = String::from_utf8(out_code).unwrap();
 
         let bindings = self.get_resource_bindings(&linked_program);
 
         // Also read the shader work-group size.
-        let entry_point_reflection = linked_program.layout(0).unwrap().find_entry_point_by_name(entry_point_name.as_str()).unwrap();
+        let entry_point_reflection = linked_program
+            .layout(0)
+            .unwrap()
+            .find_entry_point_by_name(entry_point_name.as_str())
+            .unwrap();
         // let thread_group_size = entry_point_reflection.get_compute_thread_group_size(); TODO
 
-        // let reflection_json = linked_program.layout(0).to_json_object(); TODO
+        let shader_reflection = linked_program.layout(0).unwrap();
+
+        let resource_commands = self.resource_commands_from_attributes(shader_reflection);
+        let call_commands = parse_call_commands(user_source, shader_reflection);
+
+        let mut out_code = HashMap::new();
+        for (i, entry) in shader_reflection.entry_points().enumerate() {
+            let entry_out_code = linked_program
+                .entry_point_code(
+                    i as i64, /* entry_point_index */
+                    0,        /* target_index */
+                )
+                .unwrap()
+                .as_slice()
+                .to_vec();
+            //convert to string
+            let entry_out_code = String::from_utf8(entry_out_code).unwrap();
+            out_code.insert(entry.name().to_string(), entry_out_code);
+        }
 
         return CompilationResult {
             out_code,
             bindings,
+            resource_commands,
+            call_commands,
         };
     }
+}
+
+fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {
+    match resource_result_type.kind() {
+        TypeKind::Scalar => match resource_result_type.scalar_type() {
+            slang::ScalarType::Int8 | slang::ScalarType::Uint8 => 1,
+            slang::ScalarType::Int16 | slang::ScalarType::Uint16 | slang::ScalarType::Float16 => 2,
+            slang::ScalarType::Int32 | slang::ScalarType::Uint32 | slang::ScalarType::Float32 => 4,
+            slang::ScalarType::Int64 | slang::ScalarType::Uint64 | slang::ScalarType::Float64 => 8,
+            _ => panic!("Unimplemented scalar type"),
+        },
+        TypeKind::Vector => {
+            let count = resource_result_type.element_count().next_power_of_two() as u32;
+            count * get_size(resource_result_type.element_type())
+        }
+        _ => panic!("Unimplemented type for get_size"),
+    }
+}
+
+pub enum CallCommandParameters {
+    ResourceBased(String, Option<u32>),
+    FixedSize(Vec<u32>),
+}
+
+pub struct CallCommand {
+    pub function: String,
+    pub parameters: CallCommandParameters,
+}
+
+fn parse_call_commands(user_source: String, reflection: &Shader) -> Vec<CallCommand> {
+    // Look for commands of the form:
+    //
+    // 1. //! CALL(fn-name, SIZE_OF(<resource-name>)) ==> Dispatch a compute pass with the given
+    //                                                    function name and using the resource size
+    //                                                    to determine the work-group size.
+    // 2. //! CALL(fn-name, 512, 512) ==> Dispatch a compute pass with the given function name and
+    //                                    the provided work-group size.
+    //
+
+    let mut call_commands: Vec<CallCommand> = vec![];
+    let lines = user_source.split('\n');
+    let call_regex = Regex::new(r"\/\/!\s+CALL\((\w+),\s*(.*)\)").unwrap();
+    for line in lines {
+        let Some(call_matches) = call_regex.captures(line) else {
+            continue;
+        };
+        let fn_name = call_matches.get(1).unwrap().as_str();
+        let args: Vec<&str> = call_matches
+            .get(2)
+            .unwrap()
+            .as_str()
+            .split(',')
+            .map(|arg| arg.trim())
+            .collect();
+
+        if let Some(resource_name) = args[0]
+            .strip_prefix("SIZE_OF(")
+            .and_then(|rest| rest.strip_suffix(")"))
+        {
+            let Some(resource_reflection) = reflection
+                .parameters()
+                .find(|param| param.variable().name().unwrap() == resource_name)
+            else {
+                panic!(
+                    "Cannot find resource {} for {} CALL command",
+                    resource_name, fn_name
+                )
+            };
+            let mut element_size: Option<u32> = None;
+            if resource_reflection.ty().kind() == TypeKind::Resource
+                && resource_reflection.ty().resource_shape() == ResourceShape::SlangStructuredBuffer
+            {
+                element_size = Some(get_size(resource_reflection.ty().resource_result_type()));
+            }
+            call_commands.push(CallCommand {
+                function: fn_name.to_string(),
+                parameters: CallCommandParameters::ResourceBased(
+                    resource_name.to_string(),
+                    element_size,
+                ),
+            });
+        } else {
+            call_commands.push(CallCommand {
+                function: fn_name.to_string(),
+                parameters: CallCommandParameters::FixedSize(
+                    args.iter().map(|arg| arg.parse::<u32>().unwrap()).collect(),
+                ),
+            });
+        }
+    }
+
+    return call_commands;
 }
