@@ -51,7 +51,7 @@ impl ComputePipeline {
         self.pipeline_layout = Some(layout);
     }
 
-    pub fn create_pipeline(&mut self, shader_module: wgpu::ShaderModule, resources: &HashMap<String, GPUResource>) {
+    pub fn create_pipeline(&mut self, shader_module: wgpu::ShaderModule, resources: Option<&HashMap<String, GPUResource>>) {
         let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("compute pipeline"),
             layout: Some(self.pipeline_layout.as_ref().unwrap()),
@@ -64,7 +64,9 @@ impl ComputePipeline {
         self.pipeline = Some(pipeline);
 
         // If resources are provided, create the bind group right away
-        self.create_bind_group(resources);
+        if let Some(resources) = resources {
+            self.create_bind_group(resources);
+        }
     }
 
     pub fn create_bind_group(&mut self, allocated_resources: &HashMap<String, GPUResource>) {
@@ -88,9 +90,6 @@ impl ComputePipeline {
                 GPUResource::Buffer(buffer) => {
                     entries.push(wgpu::BindGroupEntry { binding: bind_info.binding, resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()) });
                 }
-                // else if (bind_info.storageTexture) {
-                //     entries.push({ binding: bindInfo.binding, resource: resource.create_view() });
-                // } //TODO
                 GPUResource::Texture(_) => {
                     entries.push(wgpu::BindGroupEntry { binding: bind_info.binding, resource: wgpu::BindingResource::TextureView(texture_views.get(tex_idx).unwrap()) });
                     tex_idx += 1;

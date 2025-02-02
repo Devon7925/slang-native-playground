@@ -3,6 +3,7 @@ mod graphics_pipeline;
 mod slang_compiler;
 
 use image::EncodableLayout;
+use rand::Rng;
 use slang_compiler::{CallCommand, ResourceCommand, ResourceCommandData, SlangCompiler};
 use wgpu::TextureFormat;
 
@@ -100,6 +101,7 @@ async fn process_resource_commands(
     device: &wgpu::Device,
     resource_bindings: &HashMap<String, wgpu::BindGroupLayoutEntry>,
     resource_commands: Vec<ResourceCommand>,
+    random_pipeline: &mut ComputePipeline,
 ) -> HashMap<String, GPUResource> {
     let mut allocated_resources: HashMap<String, GPUResource> = HashMap::new();
 
@@ -136,6 +138,81 @@ async fn process_resource_commands(
                     &mut allocated_resources,
                     resource_name,
                     GPUResource::Buffer(buffer),
+                );
+            }
+            ResourceCommandData::RAND(count) => {
+                let element_size = 4; // RAND is only valid for floats
+                let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                    panic!("Resource {} is not defined in the bindings.", resource_name);
+                };
+
+                if !matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
+                    panic!("Resource ${resource_name} is an invalid type for RAND");
+                }
+
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    mapped_at_creation: false,
+                    size: (count * element_size) as u64,
+                    usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_DST),
+                });
+
+                // Place a call to a shader that fills the buffer with random numbers.
+
+                // Dispatch a random number generation shader.
+                // Alloc resources for the shader.
+                let mut rand_float_resources: HashMap<String, GPUResource> = HashMap::new();
+
+                rand_float_resources
+                    .insert("outputBuffer".to_string(), GPUResource::Buffer(buffer));
+
+                if !rand_float_resources.contains_key("seed") {
+                    rand_float_resources.insert(
+                        "seed".to_string(),
+                        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
+                            label: None,
+                            mapped_at_creation: false,
+                            size: 16,
+                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        })),
+                    );
+                }
+
+                // Set bindings on the pipeline.
+                random_pipeline.create_bind_group(&rand_float_resources);
+
+                let GPUResource::Buffer(seed_buffer) = rand_float_resources.get("seed").unwrap()
+                else {
+                    panic!("Invalid state");
+                };
+                let mut rng = rand::rng();
+                let seed_value: &[f32] = &[rng.random::<f32>(), 0.0, 0.0, 0.0];
+                queue.write_buffer(seed_buffer, 0, bytemuck::cast_slice(seed_value));
+
+                // Encode commands to do the computation
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("compute builtin encoder"),
+                });
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("compute builtin pass"),
+                    timestamp_writes: None,
+                });
+
+                pass.set_bind_group(0, random_pipeline.bind_group.as_ref(), &[]);
+                pass.set_pipeline(random_pipeline.pipeline.as_ref().unwrap());
+
+                let work_group_size_x = (count + 63) / 64;
+                pass.dispatch_workgroups(work_group_size_x, 1, 1);
+                drop(pass);
+
+                // Finish encoding and submit the commands
+                let command_buffer = encoder.finish();
+                queue.submit([command_buffer]);
+
+                safe_set(
+                    &mut allocated_resources,
+                    resource_name,
+                    rand_float_resources.remove("outputBuffer").unwrap(),
                 );
             }
             ResourceCommandData::BLACK(width, height) => {
@@ -208,11 +285,8 @@ async fn process_resource_commands(
                 };
 
                 let element_size = 4;
-    
-                if !matches!(
-                    binding_info.ty,
-                    wgpu::BindingType::Texture { .. }
-                ) {
+
+                if !matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
                     panic!("Resource ${resource_name} is not a texture.");
                 }
                 let url = url.trim_matches('"');
@@ -232,7 +306,9 @@ async fn process_resource_commands(
                         depth_or_array_layers: 1,
                     },
                     format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::RENDER_ATTACHMENT,
                 });
                 queue.write_texture(
                     texture.as_image_copy(),
@@ -248,96 +324,14 @@ async fn process_resource_commands(
                         depth_or_array_layers: 1,
                     },
                 );
-                safe_set(&mut allocated_resources, resource_name, GPUResource::Texture(texture));
+                safe_set(
+                    &mut allocated_resources,
+                    resource_name,
+                    GPUResource::Texture(texture),
+                );
             }
-            _ => {}
         }
     }
-    //     } else if (parsedCommand.type === "RAND") {
-    //         let elementSize = 4; // RAND is only valid for floats
-    //         let bindingInfo = resourceBindings.get(resourceName);
-    //         if (!bindingInfo) {
-    //             panic!("Resource ${resourceName} is not defined in the bindings.");
-    //         }
-
-    //         if (!bindingInfo.buffer) {
-    //             panic!("Resource ${resourceName} is not defined as a buffer.");
-    //         }
-
-    //         let buffer = device.createBuffer({
-    //             size: parsedCommand.count * elementSize,
-    //             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    //         });
-
-    //         safeSet(allocatedResources, resourceName, buffer);
-
-    //         // Place a call to a shader that fills the buffer with random numbers.
-    //         if (!randFloatPipeline) {
-    //             let randomPipeline = new ComputePipeline(device);
-
-    //             // Load randFloat shader code from the file.
-    //             let randFloatShaderCode = await (await fetch('demos/rand_float.slang')).text();
-    //             if (compiler == null) {
-    //                 panic!("Compiler is not defined!");
-    //             }
-    //             let compiledResult = compiler.compile(randFloatShaderCode, "computeMain", "WGSL");
-    //             if (!compiledResult) {
-    //                 panic!("[Internal] Failed to compile randFloat shader");
-    //             }
-
-    //             let [code, layout, hashedStrings] = compiledResult;
-    //             let module = device.createShaderModule({ code: code });
-
-    //             randomPipeline.createPipelineLayout(layout);
-
-    //             // Create the pipeline (without resource bindings for now)
-    //             randomPipeline.createPipeline(module, null);
-
-    //             randFloatPipeline = randomPipeline;
-    //         }
-
-    //         // Dispatch a random number generation shader.
-    //         {
-    //             let randomPipeline = randFloatPipeline;
-
-    //             // Alloc resources for the shader.
-    //             if (!randFloatResources)
-    //                 randFloatResources = new Map();
-
-    //             randFloatResources.set("outputBuffer", buffer);
-
-    //             if (!randFloatResources.has("seed"))
-    //                 randFloatResources.set("seed",
-    //                     device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
-
-    //             let seedBuffer = randFloatResources.get("seed") as GPUBuffer;
-
-    //             // Set bindings on the pipeline.
-    //             randFloatPipeline.createBindGroup(randFloatResources);
-
-    //             let seedValue = new Float32Array([Math.random(), 0, 0, 0]);
-    //             device.queue.writeBuffer(seedBuffer, 0, seedValue);
-
-    //             // Encode commands to do the computation
-    //             let encoder = device.createCommandEncoder({ label: 'compute builtin encoder' });
-    //             let pass = encoder.beginComputePass({ label: 'compute builtin pass' });
-
-    //             pass.setBindGroup(0, randomPipeline.bindGroup || null);
-
-    //             if (randomPipeline.pipeline == undefined) {
-    //                 panic!("Random pipeline is undefined");
-    //             }
-    //             pass.setPipeline(randomPipeline.pipeline);
-
-    //             let workGroupSizeX = Math.floor((parsedCommand.count + 63) / 64);
-    //             pass.dispatchWorkgroups(workGroupSizeX, 1);
-    //             pass.end();
-
-    //             // Finish encoding and submit the commands
-    //             let commandBuffer = encoder.finish();
-    //             device.queue.submit([commandBuffer]);
-    //             await device.queue.onSubmittedWorkDone();
-    //         }
     //     } else {
     //         // exhaustiveness check
     //         let x: never = parsedCommand;
@@ -439,16 +433,38 @@ impl State {
         let size = window.inner_size();
 
         let compiler = SlangCompiler::new();
-        let compilation = compiler.compile("imageMain".to_string());
+        let compilation = compiler.compile("shaders", None, "user.slang");
 
         let surface = instance.create_surface(window.clone()).unwrap();
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
+
+        let mut random_pipeline = ComputePipeline::new(device.clone());
+
+        // Load randFloat shader code from the file.
+        let compiled_result = compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
+
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rand float"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(
+                compiled_result
+                    .out_code
+                    .get("computeMain")
+                    .unwrap()
+                    .as_str(),
+            )),
+        });
+
+        random_pipeline.create_pipeline_layout(compiled_result.bindings);
+
+        // Create the pipeline (without resource bindings for now)
+        random_pipeline.create_pipeline(module, None);
 
         let allocated_resources = process_resource_commands(
             &queue,
             &device,
             &compilation.bindings,
             compilation.resource_commands,
+            &mut random_pipeline,
         )
         .await;
 
@@ -472,7 +488,7 @@ impl State {
             });
             let mut pipeline = ComputePipeline::new(device.clone());
             pipeline.create_pipeline_layout(compilation.bindings.clone());
-            pipeline.create_pipeline(module, &allocated_resources);
+            pipeline.create_pipeline(module, Some(&allocated_resources));
             compute_pipelines.insert(shader_name, pipeline);
         }
 

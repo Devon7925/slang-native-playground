@@ -210,7 +210,7 @@ impl SlangCompiler {
     fn add_active_entry_points(
         &self,
         slang_session: &slang::Session,
-        entry_point_name: &String,
+        entry_point_name: &Option<String>,
         user_module: slang::Module,
         component_list: &mut Vec<slang::ComponentType>,
     ) -> bool {
@@ -232,7 +232,7 @@ impl SlangCompiler {
 
         // If entry point is provided, we know for sure this is not a whole program compilation,
         // so we will just go to find the correct module to include in the compilation.
-        if entry_point_name != "" {
+        if let Some(entry_point_name) = entry_point_name {
             if SlangCompiler::is_runnable_entry_point(&entry_point_name) {
                 // we use the same entry point name as module name
                 let Some(main_program) =
@@ -480,8 +480,8 @@ impl SlangCompiler {
         return commands;
     }
 
-    pub fn compile(&self, entry_point_name: String) -> CompilationResult {
-        let search_path = std::ffi::CString::new("shaders").unwrap();
+    pub fn compile(&self, search_path: &str, entry_point_name: Option<String>, entry_module_name: &str) -> CompilationResult {
+        let search_path = std::ffi::CString::new(search_path).unwrap();
 
         // All compiler options are available through this builder.
         let session_options = slang::CompilerOptions::default()
@@ -510,11 +510,11 @@ impl SlangCompiler {
 
         let mut components: Vec<slang::ComponentType> = vec![];
 
-        let user_module = slang_session.load_module("user.slang").unwrap();
+        let user_module = slang_session.load_module(entry_module_name).unwrap();
         let user_source = fs::read_to_string(user_module.file_path()).unwrap();
         self.add_active_entry_points(
             &slang_session,
-            &"".to_string(),
+            &entry_point_name,
             user_module,
             &mut components,
         );
@@ -526,18 +526,7 @@ impl SlangCompiler {
 
         let bindings = self.get_resource_bindings(&linked_program);
 
-        // Also read the shader work-group size.
-        let entry_point_reflection = linked_program
-            .layout(0)
-            .unwrap()
-            .find_entry_point_by_name(entry_point_name.as_str())
-            .unwrap();
-        // let thread_group_size = entry_point_reflection.get_compute_thread_group_size(); TODO
-
         let shader_reflection = linked_program.layout(0).unwrap();
-
-        let resource_commands = self.resource_commands_from_attributes(shader_reflection);
-        let call_commands = parse_call_commands(user_source, shader_reflection);
 
         let mut out_code = HashMap::new();
         for (i, entry) in shader_reflection.entry_points().enumerate() {
@@ -553,6 +542,9 @@ impl SlangCompiler {
             let entry_out_code = String::from_utf8(entry_out_code).unwrap();
             out_code.insert(entry.name().to_string(), entry_out_code);
         }
+
+        let resource_commands = self.resource_commands_from_attributes(shader_reflection);
+        let call_commands = parse_call_commands(user_source, shader_reflection);
 
         return CompilationResult {
             out_code,
