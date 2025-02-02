@@ -8,7 +8,7 @@ A project to allow Slang playground shaders to run outside of a web environment.
 |------|--------|--------|
 | All Print Shaders | ❌ | Print shaders not currently supported |
 | Simple Image | ✅ | |
-| Image From URL | ❌ | URL Resources not working |
+| Image From URL | 📐 | URL must be global instead of relative |
 | Multi-kernel Demo | 📐 | If replacing RAND with ZEROS. Block size is hard coded |
 | ShaderToy: Circle | ✅ | |
 | ShaderToy: Ocean | ✅ | |

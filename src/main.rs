@@ -1,16 +1,26 @@
-mod graphics_pipeline;
 mod compute_pipeline;
+mod graphics_pipeline;
 mod slang_compiler;
 
+use image::EncodableLayout;
 use slang_compiler::{CallCommand, ResourceCommand, ResourceCommandData, SlangCompiler};
 use wgpu::TextureFormat;
 
-use std::{borrow::Cow, collections::HashMap, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use compute_pipeline::ComputePipeline;
 use graphics_pipeline::GraphicsPipeline;
 use winit::{
-    application::ApplicationHandler, dpi::PhysicalPosition, event::{ElementState, MouseButton, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::{Window, WindowId}
+    application::ApplicationHandler,
+    dpi::PhysicalPosition,
+    event::{ElementState, MouseButton, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    window::{Window, WindowId},
 };
 
 struct MouseState {
@@ -35,14 +45,23 @@ struct State {
     mouse_state: MouseState,
 }
 
-fn create_output_texture(device: &wgpu::Device, width: u32, height: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
+fn create_output_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+) -> wgpu::Texture {
     let texture_desc = wgpu::TextureDescriptor {
         label: Some("output storage texture"),
-        size: wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: width,
+            height: height,
+            depth_or_array_layers: 1,
+        },
         format: format,
-        usage: wgpu::TextureUsages::COPY_SRC |
-            wgpu::TextureUsages::STORAGE_BINDING |
-            wgpu::TextureUsages::TEXTURE_BINDING,
+        usage: wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::STORAGE_BINDING
+            | wgpu::TextureUsages::TEXTURE_BINDING,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -74,7 +93,6 @@ fn safe_set<K: Into<String>>(map: &mut HashMap<String, GPUResource>, key: K, val
     map.insert(string_key, value);
 }
 
-
 const PRINTF_BUFFER_ELEMENT_SIZE: u64 = 12;
 const PRINTF_BUFFER_SIZE: u64 = PRINTF_BUFFER_ELEMENT_SIZE * 2048; // 12 bytes per printf struct
 async fn process_resource_commands(
@@ -85,9 +103,13 @@ async fn process_resource_commands(
 ) -> HashMap<String, GPUResource> {
     let mut allocated_resources: HashMap<String, GPUResource> = HashMap::new();
 
-    for ResourceCommand { resource_name, command_data } in resource_commands {
+    for ResourceCommand {
+        resource_name,
+        command_data,
+    } in resource_commands
+    {
         match command_data {
-            ResourceCommandData::ZEROS{
+            ResourceCommandData::ZEROS {
                 count,
                 element_size,
             } => {
@@ -110,81 +132,127 @@ async fn process_resource_commands(
                 let zeros = vec![0u8; (count * element_size) as usize];
                 queue.write_buffer(&buffer, 0, &zeros);
 
-                safe_set(&mut allocated_resources, resource_name, GPUResource::Buffer(buffer));
+                safe_set(
+                    &mut allocated_resources,
+                    resource_name,
+                    GPUResource::Buffer(buffer),
+                );
+            }
+            ResourceCommandData::BLACK(width, height) => {
+                let size = width * height;
+                let element_size = 4; // Assuming 4 bytes per element (e.g., float) TODO: infer from type.
+                let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                    panic!("Resource {} is not defined in the bindings.", resource_name);
+                };
+
+                if !matches!(
+                    binding_info.ty,
+                    wgpu::BindingType::StorageTexture { .. } | wgpu::BindingType::Texture { .. }
+                ) {
+                    panic!("Resource {} is an invalid type for BLACK", resource_name);
+                }
+                let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT;
+                if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
+                    usage |= wgpu::TextureUsages::STORAGE_BINDING;
+                }
+                let format = if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. })
+                {
+                    wgpu::TextureFormat::R32Float
+                } else {
+                    wgpu::TextureFormat::Rgba8Unorm
+                };
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    dimension: wgpu::TextureDimension::D2,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    format,
+                    usage: usage,
+                    view_formats: &[],
+                });
+
+                // Initialize the texture with zeros.
+                let zeros = vec![0; (size * element_size) as usize];
+                queue.write_texture(
+                    texture.as_image_copy(),
+                    &zeros,
+                    wgpu::TexelCopyBufferLayout {
+                        bytes_per_row: Some(width * element_size),
+                        offset: 0,
+                        rows_per_image: None,
+                    },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+
+                safe_set(
+                    &mut allocated_resources,
+                    resource_name,
+                    GPUResource::Texture(texture),
+                );
+            }
+            ResourceCommandData::URL(url) => {
+                // Load image from URL and wait for it to be ready.
+                let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                    panic!("Resource {} is not defined in the bindings.", resource_name);
+                };
+
+                let element_size = 4;
+    
+                if !matches!(
+                    binding_info.ty,
+                    wgpu::BindingType::Texture { .. }
+                ) {
+                    panic!("Resource ${resource_name} is not a texture.");
+                }
+                let url = url.trim_matches('"');
+                let image_bytes = reqwest::blocking::get(url).unwrap().bytes().unwrap();
+                let image = image::load_from_memory(&image_bytes).unwrap();
+                let image = image.to_rgba8();
+
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    dimension: wgpu::TextureDimension::D2,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    view_formats: &[],
+                    size: wgpu::Extent3d {
+                        width: image.width(),
+                        height: image.height(),
+                        depth_or_array_layers: 1,
+                    },
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                });
+                queue.write_texture(
+                    texture.as_image_copy(),
+                    &image.as_bytes(),
+                    wgpu::TexelCopyBufferLayout {
+                        bytes_per_row: Some(image.width() * element_size),
+                        offset: 0,
+                        rows_per_image: None,
+                    },
+                    wgpu::Extent3d {
+                        width: image.width(),
+                        height: image.height(),
+                        depth_or_array_layers: 1,
+                    },
+                );
+                safe_set(&mut allocated_resources, resource_name, GPUResource::Texture(texture));
             }
             _ => {}
         }
     }
-    //          else if (parsedCommand.type === "BLACK") {
-    //         let size = parsedCommand.width * parsedCommand.height;
-    //         let elementSize = 4; // Assuming 4 bytes per element (e.g., float) TODO: infer from type.
-    //         let bindingInfo = resourceBindings.get(resourceName);
-    //         if (!bindingInfo) {
-    //             panic!("Resource ${resourceName} is not defined in the bindings.");
-    //         }
-
-    //         if (!bindingInfo.texture && !bindingInfo.storageTexture) {
-    //             panic!("Resource ${resourceName} is an invalid type for BLACK");
-    //         }
-    //         try {
-    //             let usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT;
-    //             if (bindingInfo.storageTexture) {
-    //                 usage |= GPUTextureUsage.STORAGE_BINDING;
-    //             }
-    //             let texture = device.createTexture({
-    //                 size: [parsedCommand.width, parsedCommand.height],
-    //                 format: bindingInfo.storageTexture ? 'r32float' : 'rgba8unorm',
-    //                 usage: usage,
-    //             });
-
-    //             safeSet(allocatedResources, resourceName, texture);
-
-    //             // Initialize the texture with zeros.
-    //             let zeros = new Uint8Array(Array(size * elementSize).fill(0));
-    //             device.queue.writeTexture({ texture }, zeros, { bytesPerRow: parsedCommand.width * elementSize }, { width: parsedCommand.width, height: parsedCommand.height });
-    //         }
-    //         catch (error) {
-    //             panic!("Failed to create texture: ${error}");
-    //         }
-    //     } else if (parsedCommand.type === "URL") {
-    //         // Load image from URL and wait for it to be ready.
-    //         let bindingInfo = resourceBindings.get(resourceName);
-
-    //         if (!bindingInfo) {
-    //             panic!("Resource ${resourceName} is not defined in the bindings.");
-    //         }
-
-    //         if (!bindingInfo.texture) {
-    //             panic!("Resource ${resourceName} is not a texture.");
-    //         }
-
-    //         let image = new Image();
-    //         try {
-    //             // TODO: Pop-up a warning if the image is not CORS-enabled.
-    //             // TODO: Pop-up a warning for the user to confirm that its okay to load a cross-origin image (i.e. do you trust this code..)
-    //             //
-    //             image.crossOrigin = "anonymous";
-
-    //             image.src = parsedCommand.url;
-    //             await image.decode();
-    //         }
-    //         catch (error) {
-    //             panic!("Failed to load & decode image from URL: ${parsedCommand.url}");
-    //         }
-
-    //         try {
-    //             let imageBitmap = await createImageBitmap(image);
-    //             let texture = device.createTexture({
-    //                 size: [imageBitmap.width, imageBitmap.height],
-    //                 format: 'rgba8unorm',
-    //                 usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    //             });
-    //             device.queue.copyExternalImageToTexture({ source: imageBitmap }, { texture: texture }, [imageBitmap.width, imageBitmap.height]);
-    //             safeSet(allocatedResources, resourceName, texture);
-    //         }
-    //         catch (error) {
-    //             panic!("Failed to create texture from image: ${error}");
-    //         }
     //     } else if (parsedCommand.type === "RAND") {
     //         let elementSize = 4; // RAND is only valid for floats
     //         let bindingInfo = resourceBindings.get(resourceName);
@@ -231,7 +299,7 @@ async fn process_resource_commands(
     //         // Dispatch a random number generation shader.
     //         {
     //             let randomPipeline = randFloatPipeline;
-  
+
     //             // Alloc resources for the shader.
     //             if (!randFloatResources)
     //                 randFloatResources = new Map();
@@ -280,44 +348,73 @@ async fn process_resource_commands(
     //
     // Some special-case allocations
     //
-    let current_window_size = [300, 150];//TODO
+    let current_window_size = [300, 150]; //TODO
 
-    safe_set(&mut allocated_resources, "outputTexture".to_string(), GPUResource::Texture(create_output_texture(&device, current_window_size[0], current_window_size[1], TextureFormat::Rgba8Unorm)));
+    safe_set(
+        &mut allocated_resources,
+        "outputTexture".to_string(),
+        GPUResource::Texture(create_output_texture(
+            &device,
+            current_window_size[0],
+            current_window_size[1],
+            TextureFormat::Rgba8Unorm,
+        )),
+    );
 
-    safe_set(&mut allocated_resources, "outputBuffer".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        mapped_at_creation: false,
-        size: 2 * 2 * 4,
-        usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_SRC),
-    })));
+    safe_set(
+        &mut allocated_resources,
+        "outputBuffer".to_string(),
+        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            mapped_at_creation: false,
+            size: 2 * 2 * 4,
+            usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_SRC),
+        })),
+    );
 
-    safe_set(&mut allocated_resources, "outputBufferRead".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        mapped_at_creation: false,
-        size: 2 * 2 * 4,
-        usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
-    })));
+    safe_set(
+        &mut allocated_resources,
+        "outputBufferRead".to_string(),
+        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            mapped_at_creation: false,
+            size: 2 * 2 * 4,
+            usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
+        })),
+    );
 
-    safe_set(&mut allocated_resources, "g_printedBuffer".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        mapped_at_creation: false,
-        size: PRINTF_BUFFER_SIZE,
-        usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_SRC),
-    })));
+    safe_set(
+        &mut allocated_resources,
+        "g_printedBuffer".to_string(),
+        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            mapped_at_creation: false,
+            size: PRINTF_BUFFER_SIZE,
+            usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_SRC),
+        })),
+    );
 
-    safe_set(&mut allocated_resources, "printfBufferRead".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        mapped_at_creation: false,
-        size: PRINTF_BUFFER_SIZE,
-        usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
-    })));
+    safe_set(
+        &mut allocated_resources,
+        "printfBufferRead".to_string(),
+        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            mapped_at_creation: false,
+            size: PRINTF_BUFFER_SIZE,
+            usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
+        })),
+    );
 
-    safe_set(&mut allocated_resources, "uniformInput".to_string(), GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        mapped_at_creation: false,
-        size: 8*4,//TODO
-        usage: wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST),
-    })));
+    safe_set(
+        &mut allocated_resources,
+        "uniformInput".to_string(),
+        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            mapped_at_creation: false,
+            size: 8 * 4, //TODO
+            usage: wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST),
+        })),
+    );
 
     return allocated_resources;
 }
@@ -344,14 +441,23 @@ impl State {
         let compiler = SlangCompiler::new();
         let compilation = compiler.compile("imageMain".to_string());
 
-        let surface = instance.create_surface(window.clone()).unwrap();   
+        let surface = instance.create_surface(window.clone()).unwrap();
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
 
-        let allocated_resources = process_resource_commands(&queue, &device, &compilation.bindings, compilation.resource_commands).await;
+        let allocated_resources = process_resource_commands(
+            &queue,
+            &device,
+            &compilation.bindings,
+            compilation.resource_commands,
+        )
+        .await;
 
         let mut pass_through_pipeline = GraphicsPipeline::new(device.clone());
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("passThrough.wgsl"));
-        let GPUResource::Texture(input_texture) = allocated_resources.get(&"outputTexture".to_string()).unwrap() else {
+        let GPUResource::Texture(input_texture) = allocated_resources
+            .get(&"outputTexture".to_string())
+            .unwrap()
+        else {
             panic!("outputTexture is not a Texture");
         };
         pass_through_pipeline.create_pipeline(&shader_module, input_texture);
@@ -381,7 +487,13 @@ impl State {
             compute_pipelines,
             call_commands: compilation.call_commands,
             allocated_resources,
-            mouse_state: MouseState { last_mouse_clicked_pos: PhysicalPosition::default(), last_mouse_down_pos: PhysicalPosition::default(), current_mouse_pos: PhysicalPosition::default(), mouse_clicked: false, is_mouse_down: false }
+            mouse_state: MouseState {
+                last_mouse_clicked_pos: PhysicalPosition::default(),
+                last_mouse_down_pos: PhysicalPosition::default(),
+                current_mouse_pos: PhysicalPosition::default(),
+                mouse_clicked: false,
+                is_mouse_down: false,
+            },
         };
 
         // Configure surface for the first time
@@ -415,12 +527,22 @@ impl State {
         // reconfigure the surface
         self.configure_surface();
 
-        safe_set(&mut self.allocated_resources, "outputTexture", GPUResource::Texture(create_output_texture(&self.device, new_size.width, new_size.height, wgpu::TextureFormat::Rgba8Unorm)));
+        safe_set(
+            &mut self.allocated_resources,
+            "outputTexture",
+            GPUResource::Texture(create_output_texture(
+                &self.device,
+                new_size.width,
+                new_size.height,
+                wgpu::TextureFormat::Rgba8Unorm,
+            )),
+        );
         for (_, compute_pipeline) in self.compute_pipelines.iter_mut() {
             compute_pipeline.create_bind_group(&self.allocated_resources);
         }
-    
-        let Some(GPUResource::Texture(in_tex)) = self.allocated_resources.get("outputTexture") else {
+
+        let Some(GPUResource::Texture(in_tex)) = self.allocated_resources.get("outputTexture")
+        else {
             panic!();
         };
         self.pass_through_pipeline.input_texture = Some(in_tex.clone());
@@ -459,15 +581,20 @@ impl State {
             time_array[3] = -time_array[3];
         }
         time_array[4] = since_the_epoch.as_millis() as u16 as f32 * 0.001;
-        let Some(GPUResource::Buffer(uniform_input)) = self.allocated_resources.get("uniformInput") else {
+        let Some(GPUResource::Buffer(uniform_input)) = self.allocated_resources.get("uniformInput")
+        else {
             panic!("uniformInput doesn't exist or is of incorrect type");
         };
-        self.queue.write_buffer(uniform_input, 0, bytemuck::cast_slice(&time_array));
+        self.queue
+            .write_buffer(uniform_input, 0, bytemuck::cast_slice(&time_array));
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
         for call_command in self.call_commands.iter() {
-            let pipeline = self.compute_pipelines.get(call_command.function.as_str()).unwrap();
+            let pipeline = self
+                .compute_pipelines
+                .get(call_command.function.as_str())
+                .unwrap();
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Compute builtin pass"),
                 timestamp_writes: None,
@@ -477,17 +604,18 @@ impl State {
             pass.set_pipeline(pipeline.pipeline.as_ref().unwrap());
 
             let size: [u32; 3] = match &call_command.parameters {
-                slang_compiler::CallCommandParameters::ResourceBased(resource_name, element_size) => {
+                slang_compiler::CallCommandParameters::ResourceBased(
+                    resource_name,
+                    element_size,
+                ) => {
                     let resource = self.allocated_resources.get(resource_name).unwrap();
                     match resource {
-                        GPUResource::Texture(texture) => {
-                            [texture.width(), texture.height(), 1]
-                        },
+                        GPUResource::Texture(texture) => [texture.width(), texture.height(), 1],
                         GPUResource::Buffer(buffer) => {
                             [buffer.size() as u32 / element_size.unwrap_or(4), 1, 1]
-                        },
+                        }
                     }
-                },
+                }
                 slang_compiler::CallCommandParameters::FixedSize(items) => {
                     if items.len() > 3 {
                         panic!("Too many parameters for call command");
@@ -497,14 +625,13 @@ impl State {
                         size[i] = *n;
                     }
                     size
-                },
+                }
             };
 
             //TODO
             let block_size_x = 64;
             let block_size_y = 1;
             let block_size_z = 1;
-    
 
             let work_group_size_x = (size[0] + block_size_x - 1) / block_size_x;
             let work_group_size_y = (size[1] + block_size_y - 1) / block_size_y;
@@ -529,7 +656,9 @@ impl State {
         drop(pass);
 
         // Create the renderpass which will clear the screen.
-        let mut renderpass = self.pass_through_pipeline.begin_render_pass(&mut encoder, &texture_view);
+        let mut renderpass = self
+            .pass_through_pipeline
+            .begin_render_pass(&mut encoder, &texture_view);
 
         renderpass.set_bind_group(0, self.pass_through_pipeline.bind_group.as_ref(), &[]);
         renderpass.set_pipeline(self.pass_through_pipeline.pipeline.as_ref().unwrap());
@@ -550,14 +679,14 @@ impl State {
         self.mouse_state.mouse_clicked = true;
         self.mouse_state.is_mouse_down = true;
     }
-    
+
     fn mousemove(&mut self, position: PhysicalPosition<f64>) {
         self.mouse_state.current_mouse_pos = position;
         if self.mouse_state.is_mouse_down {
             self.mouse_state.last_mouse_down_pos = position;
         }
     }
-    
+
     fn mouseup(&mut self) {
         self.mouse_state.is_mouse_down = false;
     }
@@ -600,10 +729,17 @@ impl ApplicationHandler for App {
                 // here as this event is always folloed up by redraw request.
                 state.resize(size);
             }
-            WindowEvent::CursorMoved { device_id: _, position } => {
+            WindowEvent::CursorMoved {
+                device_id: _,
+                position,
+            } => {
                 state.mousemove(position);
             }
-            WindowEvent::MouseInput { device_id: _, state: mouse_state, button } => {
+            WindowEvent::MouseInput {
+                device_id: _,
+                state: mouse_state,
+                button,
+            } => {
                 if button == MouseButton::Left {
                     if mouse_state == ElementState::Pressed {
                         state.mousedown();
