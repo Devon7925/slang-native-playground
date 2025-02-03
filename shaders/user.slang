@@ -1,19 +1,24 @@
-// This example demonstrates a slang-playground feature that populates a texture by loading the image from a URL.
-
 import playground;
 
-[playground::URL("static/jeep.jpg")]
-Texture2D<float4> myImage;
+[playground::RAND(131072)]
+RWStructuredBuffer<float> buf;
+
+// Fills buffer with a sine wave
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void fillBuffer(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint idx = dispatchThreadId.x;
+    buf[idx] = sin(float(idx) / 1000.0);
+}
+
+//! CALL(fillBuffer, SIZE_OF(buf))
 
 float4 imageMain(uint2 dispatchThreadID, int2 screenSize)
 {
-    uint imageW;
-    uint imageH;
-    myImage.GetDimensions(imageW, imageH);
+    uint idx = dispatchThreadID.x + dispatchThreadID.y * screenSize.x;
 
-    uint2 scaled = (uint2)floor(float2(dispatchThreadID.xy) / screenSize.y * float2(imageW, imageH));
-    uint2 flipped = uint2(scaled.x, imageH - scaled.y);
+    float rand = buf[idx % 131072];
 
-    float4 imageColor = myImage[flipped];
-    return imageColor;
+    return float4(rand, rand, rand, 1.0);
 }

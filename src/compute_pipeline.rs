@@ -11,7 +11,7 @@ pub struct ComputePipeline {
     pub bind_group: Option<wgpu::BindGroup>,
 
     // // thread group size (array of 3 integers)
-    // thread_group_size: Option<wgpu::ThreadGroupSize>,
+    pub thread_group_size: Option<[u64; 3]>,
 
     // resource name (string) -> binding descriptor 
     resource_bindings: Option<HashMap<String, wgpu::BindGroupLayoutEntry>>,
@@ -24,14 +24,14 @@ impl ComputePipeline {
             pipeline: None,
             pipeline_layout: None,
             bind_group: None,
-            // thread_group_size: None,
+            thread_group_size: None,
             resource_bindings: None,
         }
     }
 
-    // pub fn set_thread_group_size(&mut self, size: ThreadGroupSize) {
-    //     self.thread_group_size = size;
-    // }
+    pub fn set_thread_group_size(&mut self, size: [u64;3]) {
+        self.thread_group_size = Some(size);
+    }
 
     pub fn create_pipeline_layout(&mut self, resource_descriptors: HashMap<String, wgpu::BindGroupLayoutEntry>) {
         self.resource_bindings = Some(resource_descriptors);

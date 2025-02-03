@@ -9,12 +9,14 @@ A project to allow Slang playground shaders to run outside of a web environment.
 | All Print Shaders | ❌ | Print shaders not currently supported |
 | Simple Image | ✅ | |
 | Image From URL | ✅ | |
-| Multi-kernel Demo | 📐 | Block size is hard coded |
+| Multi-kernel Demo | ✅ | |
 | ShaderToy: Circle | ✅ | |
 | ShaderToy: Ocean | ✅ | |
 | Splatter Examples | ❌ | Currently blocked on https://github.com/gfx-rs/wgpu/issues/4704. |
+| Graphics Entrypoints | ❌ | Compilation only support not planned |
 | BLACK Commands | 📐 | Untested |
 | Uniform Commands | ❌ | Unimplemented |
+
 
 
 

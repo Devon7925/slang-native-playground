@@ -51,7 +51,7 @@ pub struct ResourceCommand {
 }
 
 pub struct CompilationResult {
-    pub out_code: HashMap<String, String>,
+    pub out_code: HashMap<String, (String, [u64; 3])>,
     pub bindings: HashMap<String, BindGroupLayoutEntry>,
     pub resource_commands: Vec<ResourceCommand>,
     pub call_commands: Vec<CallCommand>,
@@ -184,7 +184,7 @@ impl SlangCompiler {
             Some(module_name),
             SlangCompiler::SLANG_STAGE_COMPUTE,
         ) else {
-            panic!(); //TODO
+            panic!("Could not find entry point {}", module_name);
         };
 
         return Ok(CompiledEntryPoint {
@@ -538,9 +538,10 @@ impl SlangCompiler {
                 .unwrap()
                 .as_slice()
                 .to_vec();
+            let group_size = entry.compute_thread_group_size();
             //convert to string
             let entry_out_code = String::from_utf8(entry_out_code).unwrap();
-            out_code.insert(entry.name().to_string(), entry_out_code);
+            out_code.insert(entry.name().to_string(), (entry_out_code, group_size));
         }
 
         let resource_commands = self.resource_commands_from_attributes(shader_reflection);

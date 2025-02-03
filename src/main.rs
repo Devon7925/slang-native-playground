@@ -9,7 +9,11 @@ use url::{ParseError, Url};
 use wgpu::TextureFormat;
 
 use std::{
-    borrow::Cow, collections::HashMap, fs::read, sync::Arc, time::{SystemTime, UNIX_EPOCH}
+    borrow::Cow,
+    collections::HashMap,
+    fs::read,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use compute_pipeline::ComputePipeline;
@@ -199,8 +203,11 @@ async fn process_resource_commands(
                 pass.set_bind_group(0, random_pipeline.bind_group.as_ref(), &[]);
                 pass.set_pipeline(random_pipeline.pipeline.as_ref().unwrap());
 
-                let work_group_size_x = (count + 63) / 64;
-                pass.dispatch_workgroups(work_group_size_x, 1, 1);
+                let size = [count, 1, 1];
+                let block_size = random_pipeline.thread_group_size.unwrap();
+                let work_group_size: Vec<u32> = size.iter().zip(block_size.map(|s| s as u32)).map(|(size, block_size)| (size + block_size - 1) / block_size).collect();
+
+                pass.dispatch_workgroups(work_group_size[0], work_group_size[1], work_group_size[2]);
                 drop(pass);
 
                 // Finish encoding and submit the commands
@@ -292,7 +299,11 @@ async fn process_resource_commands(
                 let image_bytes = if let Err(ParseError::RelativeUrlWithoutBase) = parsed_url {
                     read(url).unwrap()
                 } else {
-                    reqwest::blocking::get(parsed_url.unwrap()).unwrap().bytes().unwrap().to_vec()
+                    reqwest::blocking::get(parsed_url.unwrap())
+                        .unwrap()
+                        .bytes()
+                        .unwrap()
+                        .to_vec()
                 };
                 let image = image::load_from_memory(&image_bytes).unwrap();
                 let image = image.to_rgba8();
@@ -444,19 +455,23 @@ impl State {
         let mut random_pipeline = ComputePipeline::new(device.clone());
 
         // Load randFloat shader code from the file.
-        let compiled_result = compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
+        let compiled_result =
+            compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
+
+        let (rand_code, rand_group_size) = compiled_result
+            .out_code
+            .get("computeMain")
+            .unwrap();
 
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rand float"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(
-                compiled_result
-                    .out_code
-                    .get("computeMain")
-                    .unwrap()
+                &rand_code
                     .as_str(),
             )),
         });
 
+        random_pipeline.set_thread_group_size(*rand_group_size);
         random_pipeline.create_pipeline_layout(compiled_result.bindings);
 
         // Create the pipeline (without resource bindings for now)
@@ -484,7 +499,7 @@ impl State {
 
         let mut compute_pipelines = HashMap::new();
 
-        for (shader_name, shader_code) in compilation.out_code {
+        for (shader_name, (shader_code, thread_group_size)) in compilation.out_code {
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(shader_name.as_str()),
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_code.as_str())),
@@ -492,6 +507,7 @@ impl State {
             let mut pipeline = ComputePipeline::new(device.clone());
             pipeline.create_pipeline_layout(compilation.bindings.clone());
             pipeline.create_pipeline(module, Some(&allocated_resources));
+            pipeline.set_thread_group_size(thread_group_size);
             compute_pipelines.insert(shader_name, pipeline);
         }
 
@@ -648,14 +664,11 @@ impl State {
             };
 
             //TODO
-            let block_size_x = 64;
-            let block_size_y = 1;
-            let block_size_z = 1;
+            let block_size = pipeline.thread_group_size.unwrap();
 
-            let work_group_size_x = (size[0] + block_size_x - 1) / block_size_x;
-            let work_group_size_y = (size[1] + block_size_y - 1) / block_size_y;
-            let work_group_size_z = (size[2] + block_size_z - 1) / block_size_z;
-            pass.dispatch_workgroups(work_group_size_x, work_group_size_y, work_group_size_z);
+            let work_group_size: Vec<u32> = size.iter().zip(block_size.map(|s| s as u32)).map(|(size, block_size)| (size + block_size - 1) / block_size).collect();
+            
+            pass.dispatch_workgroups(work_group_size[0], work_group_size[1], work_group_size[2]);
             drop(pass);
         }
 
@@ -669,9 +682,11 @@ impl State {
         pass.set_bind_group(0, main_compute_pipeline.bind_group.as_ref(), &[]);
         pass.set_pipeline(main_compute_pipeline.pipeline.as_ref().unwrap());
 
-        let work_group_size_x = (surface_texture.texture.width() + 15) / 16;
-        let work_group_size_y = (surface_texture.texture.height() + 15) / 16;
-        pass.dispatch_workgroups(work_group_size_x, work_group_size_y, 1);
+        let size = [surface_texture.texture.width(), surface_texture.texture.height(), 1];
+        let block_size = main_compute_pipeline.thread_group_size.unwrap();
+        let work_group_size: Vec<u32> = size.iter().zip(block_size.map(|s| s as u32)).map(|(size, block_size)| (size + block_size - 1) / block_size).collect();
+
+        pass.dispatch_workgroups(work_group_size[0], work_group_size[1], work_group_size[2]);
         drop(pass);
 
         // Create the renderpass which will clear the screen.
