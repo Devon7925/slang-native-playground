@@ -5,13 +5,11 @@ mod slang_compiler;
 use image::EncodableLayout;
 use rand::Rng;
 use slang_compiler::{CallCommand, ResourceCommand, ResourceCommandData, SlangCompiler};
+use url::{ParseError, Url};
 use wgpu::TextureFormat;
 
 use std::{
-    borrow::Cow,
-    collections::HashMap,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    borrow::Cow, collections::HashMap, fs::read, sync::Arc, time::{SystemTime, UNIX_EPOCH}
 };
 
 use compute_pipeline::ComputePipeline;
@@ -290,7 +288,12 @@ async fn process_resource_commands(
                     panic!("Resource ${resource_name} is not a texture.");
                 }
                 let url = url.trim_matches('"');
-                let image_bytes = reqwest::blocking::get(url).unwrap().bytes().unwrap();
+                let parsed_url = Url::parse(url);
+                let image_bytes = if let Err(ParseError::RelativeUrlWithoutBase) = parsed_url {
+                    read(url).unwrap()
+                } else {
+                    reqwest::blocking::get(parsed_url.unwrap()).unwrap().bytes().unwrap().to_vec()
+                };
                 let image = image::load_from_memory(&image_bytes).unwrap();
                 let image = image.to_rgba8();
 

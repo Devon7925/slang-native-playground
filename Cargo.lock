@@ -2825,6 +2825,7 @@ dependencies = [
  "slang",
  "strum 0.25.0",
  "strum_macros 0.25.3",
+ "url",
  "wgpu",
  "winit",
 ]
