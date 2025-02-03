@@ -2,16 +2,11 @@ use std::{collections::HashMap, fs};
 
 use regex::Regex;
 use slang::{
-    reflection::Shader, Downcast, EntryPoint, GlobalSession, ResourceShape, ScalarType,
-    SessionDesc, TypeKind,
+    reflection::Shader, Downcast, EntryPoint, GlobalSession, ResourceShape, ScalarType, TypeKind,
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use wgpu::BindGroupLayoutEntry;
-
-fn is_whole_program_target(compile_target: String) -> bool {
-    return compile_target == "METAL" || compile_target == "SPIRV";
-}
 
 #[derive(EnumIter, Debug, PartialEq, Clone)]
 enum ShaderType {
@@ -58,10 +53,6 @@ pub struct CompilationResult {
 }
 
 impl SlangCompiler {
-    const SLANG_STAGE_VERTEX: u32 = 1;
-    const SLANG_STAGE_FRAGMENT: u32 = 5;
-    const SLANG_STAGE_COMPUTE: u32 = 6;
-
     pub fn new() -> Self {
         let global_slang_session = slang::GlobalSession::new().unwrap();
         // self.compile_target_map = slang::get_compile_targets();
@@ -87,7 +78,6 @@ impl SlangCompiler {
         &self,
         module: &slang::Module,
         entry_point_name: Option<&String>,
-        stage: u32,
     ) -> Option<EntryPoint> {
         if entry_point_name.clone().map(|ep| ep == "").unwrap_or(true) {
             let entry_point = self.find_runnable_entry_point(module);
@@ -140,10 +130,10 @@ impl SlangCompiler {
         };
         let module = slang_session.load_module("user.slang").unwrap();
 
-        let count = module.get_defined_entry_point_count();
+        let count = module.entry_point_count();
         for i in 0..count {
-            let entry_point = module.get_defined_entry_point(i).unwrap();
-            result.push(entry_point.get_function_reflection().name().to_string());
+            let entry_point = module.entry_point_by_index(i).unwrap();
+            result.push(entry_point.function_reflection().name().to_string());
         }
 
         let program = slang_session
@@ -182,7 +172,6 @@ impl SlangCompiler {
         let Some(entry_point) = self.find_entry_point(
             &module,
             Some(module_name),
-            SlangCompiler::SLANG_STAGE_COMPUTE,
         ) else {
             panic!("Could not find entry point {}", module_name);
         };
@@ -215,12 +204,12 @@ impl SlangCompiler {
         component_list: &mut Vec<slang::ComponentType>,
     ) -> bool {
         // For now, we just don't allow user to define image_main or print_main as entry point name for simplicity
-        let count = user_module.get_defined_entry_point_count();
+        let count = user_module.entry_point_count();
         for i in 0..count {
             let name = user_module
-                .get_defined_entry_point(i)
+                .entry_point_by_index(i)
                 .unwrap()
-                .get_function_reflection()
+                .function_reflection()
                 .name()
                 .to_string();
             if SlangCompiler::is_runnable_entry_point(&name) {
@@ -248,7 +237,6 @@ impl SlangCompiler {
                 let Some(entry_point) = self.find_entry_point(
                     &user_module,
                     Some(entry_point_name),
-                    SlangCompiler::SLANG_STAGE_COMPUTE,
                 ) else {
                     return false;
                 };
@@ -273,7 +261,6 @@ impl SlangCompiler {
                     let Some(entry_point) = self.find_entry_point(
                         &user_module,
                         Some(&result),
-                        SlangCompiler::SLANG_STAGE_COMPUTE,
                     ) else {
                         return false;
                     };
@@ -480,7 +467,12 @@ impl SlangCompiler {
         return commands;
     }
 
-    pub fn compile(&self, search_path: &str, entry_point_name: Option<String>, entry_module_name: &str) -> CompilationResult {
+    pub fn compile(
+        &self,
+        search_path: &str,
+        entry_point_name: Option<String>,
+        entry_module_name: &str,
+    ) -> CompilationResult {
         let search_path = std::ffi::CString::new(search_path).unwrap();
 
         // All compiler options are available through this builder.
