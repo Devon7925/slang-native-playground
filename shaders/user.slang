@@ -1,64 +1,90 @@
+// This example demonstrates how to use interfaces and generics in Slang,
+// and how to use the extension feature to make existing types conform to an interface.
+
+// Import the playground module so we can use the `printf` utility function.
 import playground;
 
-groupshared Atomic<int> atomicVariable;
+// Define an interface that requires a conforming type to
+// provide a hash function.
+interface IMyHashable
+{
+    int getHash();
+}
+
+// Define a generic function that can print the hash of an object.
+// Here the generic type parameter `T` is constraint by the interface `IMyHashable`,
+// which means that calls to `printHash` must provide an object that conforms
+// to `IMyHashable`.
+//
+void printHash<T: IMyHashable>(T obj)
+{
+    printf("Hash: %d\n", obj.getHash());
+}
+
+// Define a type that conforms to the `IMyHashable` interface.
+struct Circle : IMyHashable
+{
+    float2 position;
+    float radius;
+
+    __init(float2 p, float r)
+    {
+        position = p;
+        radius = r;
+    }
+
+    int getHash()
+    {
+        return bit_cast<int>(position.x) ^ bit_cast<int>(position.y) ^ bit_cast<int>(radius);
+    }
+}
+
+// Additionally, we can use Slang's extension feature to make an existing builtin type
+// conform to the `IMyHashable` interface.
+extension float : IMyHashable
+{
+    int getHash()
+    {
+        return bit_cast<int>(this);
+    }
+}
+
+// We can also make all vector<T> type conform to the `IMyHashable` interface using an extension,
+// if `T` is hashable.
+extension<T:IMyHashable, int N> vector<T, N> : IMyHashable
+{
+    int getHash()
+    {
+        int hash = 0;
+        for (int i = 0; i < N; i++)
+        {
+            hash ^= this[i].getHash();
+        }
+        return hash;
+    }
+}
 
 void printMain()
 {
-    int replacedValue;
+    // Construct a circle.
+    let circle = Circle(float2(1.0, 2.0), 3.0);
 
-    print("store %d", 5);
-    atomicVariable.store(5);
-    print(": value is now %d\n", atomicVariable.load());
+    // Call the generic function to print the hash of the circle.
+    // This is OK because `Circle` conforms to `IMyHashable`.
+    printHash(circle);
 
-    print("exchange with %d", 7);
-    replacedValue = atomicVariable.exchange(7);
-    print(": value was %d, and is now %d\n", replacedValue, atomicVariable.load());
+    // Construct a float vector and print its hash.
+    let v = float3(1.0, 2.0, 3.0);
 
-    print("exchange with %d if %d matches the stored value", 9, 42);
-    replacedValue = atomicVariable.compareExchange(42, 9);
-    print(": value was %d, and is now %d\n", replacedValue, atomicVariable.load());
+    // This call works because we made `float` IMyHashable with the extension at line 44,
+    // and because `float` is IMyHashable, the extension at line 54 will also apply to make
+    // all vector<float ,N> types conform to IMyHashable and thus valid to use in the call.
+    printHash(v);
 
-    print("exchange with %d if %d matches the stored value", 9, 7);
-    replacedValue = atomicVariable.compareExchange(7, 9);
-    print(": value was %d, and is now %d\n", replacedValue, atomicVariable.load());
-
-    print("replace with minimum of stored value and %d", 13);
-    atomicVariable.min(13);
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("replace with minimum of stored value and %d", 4);
-    atomicVariable.min(4);
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("replace with maximum of stored value and %d", 3);
-    atomicVariable.max(3);
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("replace with maximum of stored value and %d", 9);
-    atomicVariable.max(9);
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("replace with bitwise XOR of stored value and %d", 15);
-    atomicVariable.xor(15);
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("replace with bitwise OR of stored value and %d", 3);
-    atomicVariable.or(3);
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("subtract %d from the stored value", 5);
-    atomicVariable.sub(5);
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("add %d to the stored value", 3);
-    atomicVariable.add(3);
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("decrement");
-    atomicVariable.decrement();
-    print(": value is now %d\n", atomicVariable.load());
-
-    print("increment");
-    atomicVariable.increment();
-    print(": value is now %d\n", atomicVariable.load());
+    // The following lines will result in a compile error because `NonHashable` does not
+    // conform to `IMyHashable`:
+    //
+    // struct NonHashable{int data;}
+    // NonHashable obj = {0};
+    // printHash(obj);
 }

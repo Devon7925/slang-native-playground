@@ -682,7 +682,6 @@ fn parse_printf_buffer(
                         return out_str_arry;
                     }
                 }
-                break;
             }
             _ => panic!("Invalid format type!"),
         }

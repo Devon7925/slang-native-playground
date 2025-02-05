@@ -17,12 +17,12 @@ A project to allow Slang playground shaders to run outside of a web environment.
 | Differentiable 2D Splatter | ❌ | Blocked on atomic reflection not working in slang. See https://github.com/shader-slang/slang/issues/6257. |
 | | | |
 | Properties | ✅ | |
-| Generics & Extensions | 📐 | Only first print displays |
-| Operator Overload | 📐 | Only first print displays |
-| Variadic generics | 📐 | Only first print displays |
-| Automatic Differentiation | 📐 | Only first print displays |
+| Generics & Extensions | ✅ | |
+| Operator Overload | ✅ | |
+| Variadic generics | ✅ | |
+| Automatic Differentiation | ✅ | |
 | Graphics Entrypoints | ❌ | Compilation only support not planned |
-| Atomics | 📐 | Only first print displays |
+| Atomics | ✅ | |
 | | | |
 | BLACK Commands | 📐 | Untested |
 | Uniform Commands | ❌ | Unimplemented |
