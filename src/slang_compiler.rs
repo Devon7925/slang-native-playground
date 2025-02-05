@@ -50,6 +50,7 @@ pub struct CompilationResult {
     pub bindings: HashMap<String, BindGroupLayoutEntry>,
     pub resource_commands: Vec<ResourceCommand>,
     pub call_commands: Vec<CallCommand>,
+    pub hashed_strings: Vec<String>,
 }
 
 impl SlangCompiler {
@@ -169,10 +170,7 @@ impl SlangCompiler {
         let module = slang_session.load_module(&module_name)?;
 
         // we use the same entry point name as module name
-        let Some(entry_point) = self.find_entry_point(
-            &module,
-            Some(module_name),
-        ) else {
+        let Some(entry_point) = self.find_entry_point(&module, Some(module_name)) else {
             panic!("Could not find entry point {}", module_name);
         };
 
@@ -234,10 +232,8 @@ impl SlangCompiler {
                 component_list.push(main_program.entry_point.downcast().clone());
             } else {
                 // we know the entry point is from user module
-                let Some(entry_point) = self.find_entry_point(
-                    &user_module,
-                    Some(entry_point_name),
-                ) else {
+                let Some(entry_point) = self.find_entry_point(&user_module, Some(entry_point_name))
+                else {
                     return false;
                 };
 
@@ -258,10 +254,8 @@ impl SlangCompiler {
                     component_list.push(main_program.entry_point.downcast().clone());
                     return true;
                 } else {
-                    let Some(entry_point) = self.find_entry_point(
-                        &user_module,
-                        Some(&result),
-                    ) else {
+                    let Some(entry_point) = self.find_entry_point(&user_module, Some(&result))
+                    else {
                         return false;
                     };
 
@@ -514,11 +508,11 @@ impl SlangCompiler {
             .create_composite_component_type(components.as_slice())
             .unwrap();
         let linked_program = program.link().unwrap();
-        // let hashed_strings = linked_program.load_strings(); TODO
 
         let bindings = self.get_resource_bindings(&linked_program);
 
         let shader_reflection = linked_program.layout(0).unwrap();
+        let hashed_strings = load_strings(shader_reflection);
 
         let mut out_code = HashMap::new();
         for (i, entry) in shader_reflection.entry_points().enumerate() {
@@ -544,8 +538,15 @@ impl SlangCompiler {
             bindings,
             resource_commands,
             call_commands,
+            hashed_strings,
         };
     }
+}
+
+fn load_strings(shader_reflection: &Shader) -> Vec<String> {
+    (0..shader_reflection.hashed_string_count())
+        .map(|i| shader_reflection.hashed_string(i).unwrap().to_string())
+        .collect()
 }
 
 fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {

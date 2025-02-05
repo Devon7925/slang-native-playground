@@ -85,7 +85,7 @@ void handleEach<T>(T value, int index) where T :  IPrintf
     g_printedBuffer[index].low = value.writePrintfWords();
 }
 
-void print<each T>(String format, expand each T values) where T : IPrintf
+public void print<each T>(String format, expand each T values) where T : IPrintf
 {
     //if (format.length != 0)
     {
@@ -99,7 +99,7 @@ void print<each T>(String format, expand each T values) where T : IPrintf
 }
 
 [OverloadRank(1)]
-void printf<each T>(String format, expand each T values) where T : IPrintf
+public void printf<each T>(String format, expand each T values) where T : IPrintf
 {
     print(format, expand each values);
 }

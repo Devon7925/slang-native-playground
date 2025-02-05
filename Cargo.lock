@@ -2817,6 +2817,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "env_logger",
+ "futures-channel",
  "image",
  "pollster",
  "rand 0.9.0",
@@ -2825,6 +2826,7 @@ dependencies = [
  "slang",
  "strum 0.25.0",
  "strum_macros 0.25.3",
+ "tokio",
  "url",
  "wgpu",
  "winit",

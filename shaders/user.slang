@@ -1,24 +1,64 @@
 import playground;
 
-[playground::RAND(131072)]
-RWStructuredBuffer<float> buf;
+groupshared Atomic<int> atomicVariable;
 
-// Fills buffer with a sine wave
-[shader("compute")]
-[numthreads(64, 1, 1)]
-void fillBuffer(uint2 dispatchThreadId : SV_DispatchThreadID)
+void printMain()
 {
-    uint idx = dispatchThreadId.x;
-    buf[idx] = sin(float(idx) / 1000.0);
-}
+    int replacedValue;
 
-//! CALL(fillBuffer, SIZE_OF(buf))
+    print("store %d", 5);
+    atomicVariable.store(5);
+    print(": value is now %d\n", atomicVariable.load());
 
-float4 imageMain(uint2 dispatchThreadID, int2 screenSize)
-{
-    uint idx = dispatchThreadID.x + dispatchThreadID.y * screenSize.x;
+    print("exchange with %d", 7);
+    replacedValue = atomicVariable.exchange(7);
+    print(": value was %d, and is now %d\n", replacedValue, atomicVariable.load());
 
-    float rand = buf[idx % 131072];
+    print("exchange with %d if %d matches the stored value", 9, 42);
+    replacedValue = atomicVariable.compareExchange(42, 9);
+    print(": value was %d, and is now %d\n", replacedValue, atomicVariable.load());
 
-    return float4(rand, rand, rand, 1.0);
+    print("exchange with %d if %d matches the stored value", 9, 7);
+    replacedValue = atomicVariable.compareExchange(7, 9);
+    print(": value was %d, and is now %d\n", replacedValue, atomicVariable.load());
+
+    print("replace with minimum of stored value and %d", 13);
+    atomicVariable.min(13);
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("replace with minimum of stored value and %d", 4);
+    atomicVariable.min(4);
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("replace with maximum of stored value and %d", 3);
+    atomicVariable.max(3);
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("replace with maximum of stored value and %d", 9);
+    atomicVariable.max(9);
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("replace with bitwise XOR of stored value and %d", 15);
+    atomicVariable.xor(15);
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("replace with bitwise OR of stored value and %d", 3);
+    atomicVariable.or(3);
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("subtract %d from the stored value", 5);
+    atomicVariable.sub(5);
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("add %d to the stored value", 3);
+    atomicVariable.add(3);
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("decrement");
+    atomicVariable.decrement();
+    print(": value is now %d\n", atomicVariable.load());
+
+    print("increment");
+    atomicVariable.increment();
+    print(": value is now %d\n", atomicVariable.load());
 }
