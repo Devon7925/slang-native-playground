@@ -757,7 +757,8 @@ impl State {
         let compiled_result =
             compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
 
-        let (rand_code, rand_group_size) = compiled_result.out_code.get("computeMain").unwrap();
+        let rand_code = compiled_result.out_code;
+        let rand_group_size = compiled_result.entry_group_sizes.get("computeMain").unwrap();
 
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rand float"),
@@ -792,10 +793,10 @@ impl State {
 
         let mut compute_pipelines = HashMap::new();
 
-        for (shader_name, (shader_code, thread_group_size)) in compilation.out_code {
+        for (shader_name, thread_group_size) in compilation.entry_group_sizes {
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(shader_name.as_str()),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_code.as_str())),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&compilation.out_code.as_str())),
             });
             let mut pipeline = ComputePipeline::new(device.clone());
             pipeline.create_pipeline_layout(compilation.bindings.clone());

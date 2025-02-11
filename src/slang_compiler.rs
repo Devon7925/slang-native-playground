@@ -53,7 +53,8 @@ pub struct ResourceCommand {
 }
 
 pub struct CompilationResult {
-    pub out_code: HashMap<String, (String, [u64; 3])>,
+    pub out_code: String,
+    pub entry_group_sizes: HashMap<String, [u64; 3]>,
     pub bindings: HashMap<String, BindGroupLayoutEntry>,
     pub resource_commands: Vec<ResourceCommand>,
     pub call_commands: Vec<CallCommand>,
@@ -259,7 +260,6 @@ impl SlangCompiler {
                     };
                     component_list.push(main_program.module.downcast().clone());
                     component_list.push(main_program.entry_point.downcast().clone());
-                    return true;
                 } else {
                     let Some(entry_point) = self.find_entry_point(&user_module, Some(&result))
                     else {
@@ -532,21 +532,18 @@ impl SlangCompiler {
 
         let shader_reflection = linked_program.layout(0).unwrap();
         let hashed_strings = load_strings(shader_reflection);
+        let out_code = linked_program
+            .target_code(0)
+            .unwrap()
+            .as_slice()
+            .to_vec();
+        let out_code = String::from_utf8(out_code).unwrap();
 
-        let mut out_code = HashMap::new();
-        for (i, entry) in shader_reflection.entry_points().enumerate() {
-            let entry_out_code = linked_program
-                .entry_point_code(
-                    i as i64, /* entry_point_index */
-                    0,        /* target_index */
-                )
-                .unwrap()
-                .as_slice()
-                .to_vec();
+        let mut entry_group_sizes = HashMap::new();
+        for entry in shader_reflection.entry_points() {
             let group_size = entry.compute_thread_group_size();
             //convert to string
-            let entry_out_code = String::from_utf8(entry_out_code).unwrap();
-            out_code.insert(entry.name().to_string(), (entry_out_code, group_size));
+            entry_group_sizes.insert(entry.name().to_string(), group_size);
         }
 
         let resource_commands = self.resource_commands_from_attributes(shader_reflection);
@@ -554,6 +551,7 @@ impl SlangCompiler {
 
         return CompilationResult {
             out_code,
+            entry_group_sizes,
             bindings,
             resource_commands,
             call_commands,
