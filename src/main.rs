@@ -2,11 +2,10 @@ mod compute_pipeline;
 mod graphics_pipeline;
 mod slang_compiler;
 
-use image::EncodableLayout;
 use rand::Rng;
 use regex::Regex;
 use slang_compiler::{CallCommand, ResourceCommand, ResourceCommandData, SlangCompiler};
-use tokio::runtime::{self, Runtime};
+use tokio::runtime;
 use url::{ParseError, Url};
 use wgpu::TextureFormat;
 
@@ -231,7 +230,11 @@ async fn process_resource_commands(
                     rand_float_resources.remove("outputBuffer").unwrap(),
                 );
             }
-            ResourceCommandData::BLACK(width, height) => {
+            ResourceCommandData::BLACK {
+                width,
+                height,
+                format,
+            } => {
                 let size = width * height;
                 let element_size = 4; // Assuming 4 bytes per element (e.g., float) TODO: infer from type.
                 let Some(binding_info) = resource_bindings.get(&resource_name) else {
@@ -250,12 +253,6 @@ async fn process_resource_commands(
                 if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
                     usage |= wgpu::TextureUsages::STORAGE_BINDING;
                 }
-                let format = if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. })
-                {
-                    wgpu::TextureFormat::R32Float
-                } else {
-                    wgpu::TextureFormat::Rgba8Unorm
-                };
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: None,
                     dimension: wgpu::TextureDimension::D2,
@@ -294,13 +291,13 @@ async fn process_resource_commands(
                     GPUResource::Texture(texture),
                 );
             }
-            ResourceCommandData::URL(url) => {
+            ResourceCommandData::URL { url, format } => {
                 // Load image from URL and wait for it to be ready.
                 let Some(binding_info) = resource_bindings.get(&resource_name) else {
                     panic!("Resource {} is not defined in the bindings.", resource_name);
                 };
 
-                let element_size = 4;
+                let element_size = format.block_copy_size(None).unwrap();
 
                 if !matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
                     panic!("Resource ${resource_name} is not a texture.");
@@ -317,8 +314,37 @@ async fn process_resource_commands(
                         .to_vec()
                 };
                 let image = image::load_from_memory(&image_bytes).unwrap();
-                let image = image.to_rgba8();
-
+                let data = match format {
+                    wgpu::TextureFormat::Rgba8Unorm => image.to_rgba8().to_vec(),
+                    wgpu::TextureFormat::R8Unorm => image.to_rgba8().to_vec().iter()
+                        .enumerate()
+                        .filter(|(i, _)| (*i % 4) < 1)
+                        .map(|(_, c)| c)
+                        .cloned()
+                        .collect(),
+                    wgpu::TextureFormat::Rg8Unorm => image.to_rgba8().to_vec().iter()
+                        .enumerate()
+                        .filter(|(i, _)| (*i % 4) < 2)
+                        .map(|(_, c)| c)
+                        .cloned()
+                        .collect(),
+                    wgpu::TextureFormat::Rgba32Float => image
+                        .to_rgba32f()
+                        .to_vec()
+                        .iter()
+                        .flat_map(|c| c.to_le_bytes())
+                        .collect(),
+                    wgpu::TextureFormat::Rg32Float => image
+                        .to_rgba32f()
+                        .to_vec()
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| (*i % 4) < 2)
+                        .map(|(_, c)| c)
+                        .flat_map(|c| c.to_le_bytes())
+                        .collect(),
+                    f => panic!("URL unimplemented for image format {f:?}"),
+                };
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: None,
                     dimension: wgpu::TextureDimension::D2,
@@ -330,14 +356,14 @@ async fn process_resource_commands(
                         height: image.height(),
                         depth_or_array_layers: 1,
                     },
-                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    format,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING
                         | wgpu::TextureUsages::COPY_DST
                         | wgpu::TextureUsages::RENDER_ATTACHMENT,
                 });
                 queue.write_texture(
                     texture.as_image_copy(),
-                    &image.as_bytes(),
+                    &data,
                     wgpu::TexelCopyBufferLayout {
                         bytes_per_row: Some(image.width() * element_size),
                         offset: 0,
@@ -1057,7 +1083,7 @@ impl State {
                     let _ = sender.send(result);
                 });
             self.device.poll(wgpu::Maintain::Wait);
-            let rt  = runtime::Builder::new_current_thread().build().unwrap();
+            let rt = runtime::Builder::new_current_thread().build().unwrap();
             rt.spawn_blocking(|| async {
                 receiver
                     .await

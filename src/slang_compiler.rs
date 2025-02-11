@@ -36,8 +36,15 @@ struct CompiledEntryPoint {
 pub enum ResourceCommandData {
     ZEROS { count: u32, element_size: u32 },
     RAND(u32),
-    BLACK(u32, u32),
-    URL(String),
+    BLACK {
+        width: u32, 
+        height: u32,
+        format: wgpu::TextureFormat,
+    },
+    URL {
+        url: String,
+        format: wgpu::TextureFormat,
+    },
 }
 
 pub struct ResourceCommand {
@@ -370,14 +377,14 @@ impl SlangCompiler {
                     {
                         panic!(
                             "ZEROS attribute cannot be applied to {}, it only supports buffers",
-                            parameter.semantic_name().unwrap()
+                            parameter.variable().name().unwrap()
                         )
                     }
                     let count = attribute.argument_value_int(0).unwrap();
                     if count < 0 {
                         panic!(
                             "ZEROS count for {} cannot have negative size",
-                            parameter.semantic_name().unwrap()
+                            parameter.variable().name().unwrap()
                         )
                     }
                     Some(ResourceCommandData::ZEROS {
@@ -390,20 +397,20 @@ impl SlangCompiler {
                     {
                         panic!(
                             "RAND attribute cannot be applied to {}, it only supports buffers",
-                            parameter.semantic_name().unwrap()
+                            parameter.variable().name().unwrap()
                         )
                     }
                     if parameter.ty().resource_result_type().kind() != TypeKind::Scalar
                         || parameter.ty().resource_result_type().scalar_type()
                             != ScalarType::Float32
                     {
-                        panic!("RAND attribute cannot be applied to {}, it only supports float buffers", parameter.semantic_name().unwrap())
+                        panic!("RAND attribute cannot be applied to {}, it only supports float buffers", parameter.variable().name().unwrap())
                     }
                     let count = attribute.argument_value_int(0).unwrap();
                     if count < 0 {
                         panic!(
                             "RAND count for {} cannot have negative size",
-                            parameter.semantic_name().unwrap()
+                            parameter.variable().name().unwrap()
                         )
                     }
                     Some(ResourceCommandData::RAND(count as u32))
@@ -413,7 +420,7 @@ impl SlangCompiler {
                     {
                         panic!(
                             "BLACK attribute cannot be applied to {}, it only supports 2D textures",
-                            parameter.semantic_name().unwrap()
+                            parameter.variable().name().unwrap()
                         )
                     }
 
@@ -422,29 +429,41 @@ impl SlangCompiler {
                     if width < 0 {
                         panic!(
                             "BLACK width for {} cannot have negative size",
-                            parameter.semantic_name().unwrap()
+                            parameter.variable().name().unwrap()
                         )
                     }
                     if height < 0 {
                         panic!(
                             "BLACK height for {} cannot have negative size",
-                            parameter.semantic_name().unwrap()
+                            parameter.variable().name().unwrap()
                         )
                     }
 
-                    Some(ResourceCommandData::BLACK(width as u32, height as u32))
+                    let bi = parameter.binding_index();
+                    let format = shader_reflection.global_params_type_layout().element_type_layout().binding_range_image_format(bi as i64 - 1);
+
+                    Some(ResourceCommandData::BLACK {
+                        width: width as u32,
+                        height: height as u32,
+                        format: get_wgpu_format_from_slang_format(format),
+                    })
                 } else if playground_attribute_name == "URL" {
                     if parameter.ty().kind() != TypeKind::Resource
                         || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
                     {
                         panic!(
                             "URL attribute cannot be applied to {}, it only supports 2D textures",
-                            parameter.semantic_name().unwrap()
+                            parameter.variable().name().unwrap()
                         )
                     }
-                    Some(ResourceCommandData::URL(
-                        attribute.argument_value_string(0).unwrap().to_string(),
-                    ))
+                    
+                    let bi = parameter.binding_index();
+                    let format = shader_reflection.global_params_type_layout().element_type_layout().binding_range_image_format(bi as i64 - 1);
+                    
+                    Some(ResourceCommandData::URL {
+                        url: attribute.argument_value_string(0).unwrap().to_string(),
+                        format: get_wgpu_format_from_slang_format(format),
+                    })
                 } else {
                     None
                 };
@@ -540,6 +559,45 @@ impl SlangCompiler {
             call_commands,
             hashed_strings,
         };
+    }
+}
+
+fn get_wgpu_format_from_slang_format(format: slang::ImageFormat) -> wgpu::TextureFormat {
+    use slang::ImageFormat;
+    use wgpu::TextureFormat;
+    match format {
+        ImageFormat::SLANGIMAGEFORMATUnknown => TextureFormat::Rgba8Unorm,
+        ImageFormat::SLANGIMAGEFORMATR8Snorm => TextureFormat::R8Snorm,
+        ImageFormat::SLANGIMAGEFORMATR8 => TextureFormat::R8Unorm,
+        ImageFormat::SLANGIMAGEFORMATR8ui => TextureFormat::R8Uint,
+        ImageFormat::SLANGIMAGEFORMATR8i => TextureFormat::R8Sint,
+        ImageFormat::SLANGIMAGEFORMATR16ui => TextureFormat::R16Uint,
+        ImageFormat::SLANGIMAGEFORMATR16i => TextureFormat::R16Sint,
+        ImageFormat::SLANGIMAGEFORMATR16 => TextureFormat::R16Unorm,
+        ImageFormat::SLANGIMAGEFORMATRg8 => TextureFormat::Rg8Unorm,
+        ImageFormat::SLANGIMAGEFORMATRg8Snorm => TextureFormat::Rg8Snorm,
+        ImageFormat::SLANGIMAGEFORMATRg8ui => TextureFormat::Rg8Uint,
+        ImageFormat::SLANGIMAGEFORMATRg8i => TextureFormat::Rg8Sint,
+        ImageFormat::SLANGIMAGEFORMATR32ui => TextureFormat::R32Uint,
+        ImageFormat::SLANGIMAGEFORMATR32i => TextureFormat::R32Sint,
+        ImageFormat::SLANGIMAGEFORMATR32f => TextureFormat::R32Float,
+        ImageFormat::SLANGIMAGEFORMATRg16ui => TextureFormat::Rg16Uint,
+        ImageFormat::SLANGIMAGEFORMATRg16i => TextureFormat::Rg16Sint,
+        ImageFormat::SLANGIMAGEFORMATRg16 => TextureFormat::Rg16Unorm,
+        ImageFormat::SLANGIMAGEFORMATRgba8Snorm => TextureFormat::Rgba8Snorm,
+        ImageFormat::SLANGIMAGEFORMATRgba8ui => TextureFormat::Rgba8Uint,
+        ImageFormat::SLANGIMAGEFORMATRgba8i => TextureFormat::Rgba8Sint,
+        ImageFormat::SLANGIMAGEFORMATRgba8 => TextureFormat::Rgba8Unorm,
+        ImageFormat::SLANGIMAGEFORMATRg32ui => TextureFormat::Rg32Uint,
+        ImageFormat::SLANGIMAGEFORMATRg32i => TextureFormat::Rg32Sint,
+        ImageFormat::SLANGIMAGEFORMATRg32f => TextureFormat::Rg32Float,
+        ImageFormat::SLANGIMAGEFORMATRgba16ui => TextureFormat::Rgba16Uint,
+        ImageFormat::SLANGIMAGEFORMATRgba16i => TextureFormat::Rgba16Sint,
+        ImageFormat::SLANGIMAGEFORMATRgba16 => TextureFormat::Rgba16Unorm,
+        ImageFormat::SLANGIMAGEFORMATRgba32ui => TextureFormat::Rgba32Uint,
+        ImageFormat::SLANGIMAGEFORMATRgba32i => TextureFormat::Rgba32Sint,
+        ImageFormat::SLANGIMAGEFORMATRgba32f => TextureFormat::Rgba32Float,
+        f => panic!("Unsupported image format {f:?}")
     }
 }
 
