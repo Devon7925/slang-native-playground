@@ -2,7 +2,8 @@ use std::{collections::HashMap, fs};
 
 use regex::Regex;
 use slang::{
-    reflection::Shader, Downcast, EntryPoint, GlobalSession, ResourceShape, ScalarType, TypeKind,
+    reflection::Shader, Downcast, EntryPoint, GlobalSession, ParameterCategory, ResourceShape,
+    ScalarType, TypeKind,
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -34,10 +35,13 @@ struct CompiledEntryPoint {
 }
 
 pub enum ResourceCommandData {
-    ZEROS { count: u32, element_size: u32 },
+    ZEROS {
+        count: u32,
+        element_size: u32,
+    },
     RAND(u32),
     BLACK {
-        width: u32, 
+        width: u32,
         height: u32,
         format: wgpu::TextureFormat,
     },
@@ -45,11 +49,38 @@ pub enum ResourceCommandData {
         url: String,
         format: wgpu::TextureFormat,
     },
+    SLIDER {
+        default: f32,
+        min: f32,
+        max: f32,
+        element_size: usize,
+        offset: usize,
+    },
+    COLORPICK {
+        default: [f32; 3],
+        element_size: usize,
+        offset: usize,
+    },
 }
 
 pub struct ResourceCommand {
     pub resource_name: String,
     pub command_data: ResourceCommandData,
+}
+
+pub enum UniformController {
+    SLIDER {
+        name: String,
+        value: f32,
+        min: f32,
+        max: f32,
+        buffer_offset: usize,
+    },
+    COLORPICK {
+        name: String,
+        value: [f32; 3],
+        buffer_offset: usize,
+    },
 }
 
 pub struct CompilationResult {
@@ -59,6 +90,7 @@ pub struct CompilationResult {
     pub resource_commands: Vec<ResourceCommand>,
     pub call_commands: Vec<CallCommand>,
     pub hashed_strings: Vec<String>,
+    pub uniform_size: u64,
 }
 
 impl SlangCompiler {
@@ -325,12 +357,11 @@ impl SlangCompiler {
     ) -> HashMap<String, wgpu::BindGroupLayoutEntry> {
         let reflection = linked_program.layout(0).unwrap(); // assume target-index = 0
 
-        let count = reflection.parameter_count();
-
         let mut resource_descriptors = HashMap::new();
-        for i in 0..count {
-            let parameter = reflection.parameter_by_index(i).unwrap();
+        for parameter in reflection.parameters() {
             let name = parameter.variable().name().unwrap().to_string();
+            if parameter.category() == ParameterCategory::Uniform { continue }
+
 
             let resource_info =
                 self.get_binding_descriptor(parameter.binding_index(), reflection, parameter);
@@ -343,6 +374,12 @@ impl SlangCompiler {
 
             resource_descriptors.insert(name, binding);
         }
+        resource_descriptors.insert("uniformInput".to_string(), wgpu::BindGroupLayoutEntry {
+            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+            binding: 0,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            count: None,
+        });
 
         return resource_descriptors;
     }
@@ -376,14 +413,14 @@ impl SlangCompiler {
                         || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
                     {
                         panic!(
-                            "ZEROS attribute cannot be applied to {}, it only supports buffers",
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
                             parameter.variable().name().unwrap()
                         )
                     }
                     let count = attribute.argument_value_int(0).unwrap();
                     if count < 0 {
                         panic!(
-                            "ZEROS count for {} cannot have negative size",
+                            "{playground_attribute_name} count for {} cannot have negative size",
                             parameter.variable().name().unwrap()
                         )
                     }
@@ -396,7 +433,7 @@ impl SlangCompiler {
                         || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
                     {
                         panic!(
-                            "RAND attribute cannot be applied to {}, it only supports buffers",
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
                             parameter.variable().name().unwrap()
                         )
                     }
@@ -404,12 +441,12 @@ impl SlangCompiler {
                         || parameter.ty().resource_result_type().scalar_type()
                             != ScalarType::Float32
                     {
-                        panic!("RAND attribute cannot be applied to {}, it only supports float buffers", parameter.variable().name().unwrap())
+                        panic!("{playground_attribute_name} attribute cannot be applied to {}, it only supports float buffers", parameter.variable().name().unwrap())
                     }
                     let count = attribute.argument_value_int(0).unwrap();
                     if count < 0 {
                         panic!(
-                            "RAND count for {} cannot have negative size",
+                            "{playground_attribute_name} count for {} cannot have negative size",
                             parameter.variable().name().unwrap()
                         )
                     }
@@ -419,7 +456,7 @@ impl SlangCompiler {
                         || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
                     {
                         panic!(
-                            "BLACK attribute cannot be applied to {}, it only supports 2D textures",
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports 2D textures",
                             parameter.variable().name().unwrap()
                         )
                     }
@@ -428,24 +465,27 @@ impl SlangCompiler {
                     let height = attribute.argument_value_int(1).unwrap();
                     if width < 0 {
                         panic!(
-                            "BLACK width for {} cannot have negative size",
+                            "{playground_attribute_name} width for {} cannot have negative size",
                             parameter.variable().name().unwrap()
                         )
                     }
                     if height < 0 {
                         panic!(
-                            "BLACK height for {} cannot have negative size",
+                            "{playground_attribute_name} height for {} cannot have negative size",
                             parameter.variable().name().unwrap()
                         )
                     }
 
                     let bi = parameter.binding_index();
-                    let format = shader_reflection.global_params_type_layout().element_type_layout().binding_range_image_format(bi as i64 - 1);
+                    let format = shader_reflection
+                        .global_params_type_layout()
+                        .element_type_layout()
+                        .binding_range_image_format(bi as i64 - 1);
 
                     Some(ResourceCommandData::BLACK {
                         width: width as u32,
                         height: height as u32,
-                        format: get_wgpu_format_from_slang_format(format),
+                        format: get_wgpu_format_from_slang_format(format, parameter.ty().resource_result_type()),
                     })
                 } else if playground_attribute_name == "URL" {
                     if parameter.ty().kind() != TypeKind::Resource
@@ -456,13 +496,57 @@ impl SlangCompiler {
                             parameter.variable().name().unwrap()
                         )
                     }
-                    
+
                     let bi = parameter.binding_index();
-                    let format = shader_reflection.global_params_type_layout().element_type_layout().binding_range_image_format(bi as i64 - 1);
-                    
+                    let format = shader_reflection
+                        .global_params_type_layout()
+                        .element_type_layout()
+                        .binding_range_image_format(bi as i64 - 1);
+
                     Some(ResourceCommandData::URL {
                         url: attribute.argument_value_string(0).unwrap().to_string(),
-                        format: get_wgpu_format_from_slang_format(format),
+                        format: get_wgpu_format_from_slang_format(format, parameter.ty().resource_result_type()),
+                    })
+                } else if playground_attribute_name == "SLIDER" {
+                    if parameter.ty().kind() != TypeKind::Scalar
+                        || parameter.ty().scalar_type() != ScalarType::Float32
+                        || parameter.category_by_index(0) != ParameterCategory::Uniform
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    Some(ResourceCommandData::SLIDER {
+                        default: attribute.argument_value_float(0).unwrap(),
+                        min: attribute.argument_value_float(1).unwrap(),
+                        max: attribute.argument_value_float(2).unwrap(),
+                        element_size: parameter.type_layout().size(ParameterCategory::Uniform),
+                        offset: parameter.offset(ParameterCategory::Uniform),
+                    })
+                } else if playground_attribute_name == "COLOR_PICK" {
+                    if parameter.ty().kind() != TypeKind::Vector
+                        || parameter.ty().element_count() <= 2
+                        || parameter.ty().element_type().kind() != TypeKind::Scalar
+                        || parameter.ty().element_type().scalar_type() != ScalarType::Float32
+                        || parameter.category_by_index(0) != ParameterCategory::Uniform
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float vectors",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    Some(ResourceCommandData::COLORPICK {
+                        default: [
+                            attribute.argument_value_float(0).unwrap(),
+                            attribute.argument_value_float(1).unwrap(),
+                            attribute.argument_value_float(2).unwrap(),
+                        ],
+                        element_size: parameter.type_layout().size(ParameterCategory::Uniform)
+                            / parameter.ty().element_count(),
+                        offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else {
                     None
@@ -532,11 +616,7 @@ impl SlangCompiler {
 
         let shader_reflection = linked_program.layout(0).unwrap();
         let hashed_strings = load_strings(shader_reflection);
-        let out_code = linked_program
-            .target_code(0)
-            .unwrap()
-            .as_slice()
-            .to_vec();
+        let out_code = linked_program.target_code(0).unwrap().as_slice().to_vec();
         let out_code = String::from_utf8(out_code).unwrap();
 
         let mut entry_group_sizes = HashMap::new();
@@ -556,15 +636,33 @@ impl SlangCompiler {
             resource_commands,
             call_commands,
             hashed_strings,
+            uniform_size: get_uniform_size(shader_reflection),
         };
     }
 }
 
-fn get_wgpu_format_from_slang_format(format: slang::ImageFormat) -> wgpu::TextureFormat {
+fn round_up_to_nearest(size: u64, arg: u64) -> u64 {
+    (size + arg - 1) / arg * arg
+}
+
+fn get_wgpu_format_from_slang_format(format: slang::ImageFormat, resource_type: &slang::reflection::Type) -> wgpu::TextureFormat {
     use slang::ImageFormat;
     use wgpu::TextureFormat;
     match format {
-        ImageFormat::SLANGIMAGEFORMATUnknown => TextureFormat::Rgba8Unorm,
+        ImageFormat::SLANGIMAGEFORMATUnknown => {
+            match resource_type.kind() {
+                TypeKind::Vector => todo!(),
+                TypeKind::Scalar => {
+                    match resource_type.scalar_type() {
+                        ScalarType::Int32 => TextureFormat::R32Sint,
+                        ScalarType::Uint32 => TextureFormat::R32Uint,
+                        ScalarType::Float32 => TextureFormat::R32Float,
+                        _ => panic!("Invalid resource type"),
+                    }
+                },
+                _ => panic!("Invalid resource type"),
+            }
+        },
         ImageFormat::SLANGIMAGEFORMATR8Snorm => TextureFormat::R8Snorm,
         ImageFormat::SLANGIMAGEFORMATR8 => TextureFormat::R8Unorm,
         ImageFormat::SLANGIMAGEFORMATR8ui => TextureFormat::R8Uint,
@@ -595,7 +693,7 @@ fn get_wgpu_format_from_slang_format(format: slang::ImageFormat) -> wgpu::Textur
         ImageFormat::SLANGIMAGEFORMATRgba32ui => TextureFormat::Rgba32Uint,
         ImageFormat::SLANGIMAGEFORMATRgba32i => TextureFormat::Rgba32Sint,
         ImageFormat::SLANGIMAGEFORMATRgba32f => TextureFormat::Rgba32Float,
-        f => panic!("Unsupported image format {f:?}")
+        f => panic!("Unsupported image format {f:?}"),
     }
 }
 
@@ -695,4 +793,52 @@ fn parse_call_commands(user_source: String, reflection: &Shader) -> Vec<CallComm
     }
 
     return call_commands;
+}
+
+fn get_uniform_size(shader_reflection: &Shader) -> u64 {
+    let mut size = 0;
+
+    for parameter in shader_reflection.parameters() {
+        if parameter.category_by_index(0) != ParameterCategory::Uniform {
+            continue;
+        }
+        size = size.max(
+            parameter.offset(ParameterCategory::Uniform) as u64
+                + parameter.type_layout().size(ParameterCategory::Uniform) as u64,
+        )
+    }
+
+    return round_up_to_nearest(size, 16);
+}
+
+pub fn get_uniform_sliders(resource_commands: Vec<ResourceCommand>) -> Vec<UniformController> {
+    let mut controllers: Vec<UniformController> = vec![];
+    for resource_command in resource_commands {
+        match resource_command.command_data {
+            ResourceCommandData::SLIDER {
+                default,
+                min,
+                max,
+                offset,
+                ..
+            } => controllers.push(UniformController::SLIDER {
+                name: resource_command.resource_name,
+                value: default,
+                min,
+                max,
+                buffer_offset: offset,
+            }),
+            ResourceCommandData::COLORPICK {
+                default, offset, ..
+            } => {
+                controllers.push(UniformController::COLORPICK {
+                    name: resource_command.resource_name,
+                    value: default,
+                    buffer_offset: offset,
+                });
+            }
+            _ => {}
+        }
+    }
+    return controllers;
 }

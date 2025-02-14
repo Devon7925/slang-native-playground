@@ -1,16 +1,24 @@
 mod compute_pipeline;
+mod egui_tools;
 mod graphics_pipeline;
 mod slang_compiler;
 
+use egui::Slider;
+use egui_tools::EguiRenderer;
+use egui_wgpu::ScreenDescriptor;
 use rand::Rng;
 use regex::Regex;
-use slang_compiler::{CallCommand, ResourceCommand, ResourceCommandData, SlangCompiler};
+use slang_compiler::{
+    get_uniform_sliders, CallCommand, ResourceCommand, ResourceCommandData, SlangCompiler,
+    UniformController,
+};
 use tokio::runtime;
 use url::{ParseError, Url};
-use wgpu::TextureFormat;
+use wgpu::{Features, SurfaceError, TextureFormat};
 
 use std::{
     borrow::Cow,
+    cell::RefCell,
     collections::HashMap,
     fs::read,
     sync::Arc,
@@ -21,7 +29,7 @@ use compute_pipeline::ComputePipeline;
 use graphics_pipeline::GraphicsPipeline;
 use winit::{
     application::ApplicationHandler,
-    dpi::PhysicalPosition,
+    dpi::{PhysicalPosition, PhysicalSize},
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
@@ -45,6 +53,7 @@ struct State {
     pass_through_pipeline: GraphicsPipeline,
     compute_pipelines: HashMap<String, ComputePipeline>,
     call_commands: Vec<CallCommand>,
+    uniform_components: Arc<RefCell<Vec<UniformController>>>,
     hashed_strings: Vec<String>,
     allocated_resources: HashMap<String, GPUResource>,
     mouse_state: MouseState,
@@ -104,10 +113,22 @@ async fn process_resource_commands(
     queue: &wgpu::Queue,
     device: &wgpu::Device,
     resource_bindings: &HashMap<String, wgpu::BindGroupLayoutEntry>,
-    resource_commands: Vec<ResourceCommand>,
+    resource_commands: &Vec<ResourceCommand>,
     random_pipeline: &mut ComputePipeline,
+    uniform_size: u64,
 ) -> HashMap<String, GPUResource> {
     let mut allocated_resources: HashMap<String, GPUResource> = HashMap::new();
+
+    safe_set(
+        &mut allocated_resources,
+        "uniformInput".to_string(),
+        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            mapped_at_creation: false,
+            size: uniform_size,
+            usage: wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST),
+        })),
+    );
 
     for ResourceCommand {
         resource_name,
@@ -119,7 +140,7 @@ async fn process_resource_commands(
                 count,
                 element_size,
             } => {
-                let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                let Some(binding_info) = resource_bindings.get(resource_name) else {
                     panic!("Resource ${resource_name} is not defined in the bindings.");
                 };
 
@@ -146,7 +167,7 @@ async fn process_resource_commands(
             }
             ResourceCommandData::RAND(count) => {
                 let element_size = 4; // RAND is only valid for floats
-                let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                let Some(binding_info) = resource_bindings.get(resource_name) else {
                     panic!("Resource {} is not defined in the bindings.", resource_name);
                 };
 
@@ -205,7 +226,7 @@ async fn process_resource_commands(
                 pass.set_bind_group(0, random_pipeline.bind_group.as_ref(), &[]);
                 pass.set_pipeline(random_pipeline.pipeline.as_ref().unwrap());
 
-                let size = [count, 1, 1];
+                let size = [*count, 1, 1];
                 let block_size = random_pipeline.thread_group_size.unwrap();
                 let work_group_size: Vec<u32> = size
                     .iter()
@@ -237,7 +258,7 @@ async fn process_resource_commands(
             } => {
                 let size = width * height;
                 let element_size = 4; // Assuming 4 bytes per element (e.g., float) TODO: infer from type.
-                let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                let Some(binding_info) = resource_bindings.get(resource_name) else {
                     panic!("Resource {} is not defined in the bindings.", resource_name);
                 };
 
@@ -259,11 +280,11 @@ async fn process_resource_commands(
                     mip_level_count: 1,
                     sample_count: 1,
                     size: wgpu::Extent3d {
-                        width,
-                        height,
+                        width: *width,
+                        height: *height,
                         depth_or_array_layers: 1,
                     },
-                    format,
+                    format: *format,
                     usage: usage,
                     view_formats: &[],
                 });
@@ -279,8 +300,8 @@ async fn process_resource_commands(
                         rows_per_image: None,
                     },
                     wgpu::Extent3d {
-                        width,
-                        height,
+                        width: *width,
+                        height: *height,
                         depth_or_array_layers: 1,
                     },
                 );
@@ -293,7 +314,7 @@ async fn process_resource_commands(
             }
             ResourceCommandData::URL { url, format } => {
                 // Load image from URL and wait for it to be ready.
-                let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                let Some(binding_info) = resource_bindings.get(resource_name) else {
                     panic!("Resource {} is not defined in the bindings.", resource_name);
                 };
 
@@ -316,13 +337,19 @@ async fn process_resource_commands(
                 let image = image::load_from_memory(&image_bytes).unwrap();
                 let data = match format {
                     wgpu::TextureFormat::Rgba8Unorm => image.to_rgba8().to_vec(),
-                    wgpu::TextureFormat::R8Unorm => image.to_rgba8().to_vec().iter()
+                    wgpu::TextureFormat::R8Unorm => image
+                        .to_rgba8()
+                        .to_vec()
+                        .iter()
                         .enumerate()
                         .filter(|(i, _)| (*i % 4) < 1)
                         .map(|(_, c)| c)
                         .cloned()
                         .collect(),
-                    wgpu::TextureFormat::Rg8Unorm => image.to_rgba8().to_vec().iter()
+                    wgpu::TextureFormat::Rg8Unorm => image
+                        .to_rgba8()
+                        .to_vec()
+                        .iter()
                         .enumerate()
                         .filter(|(i, _)| (*i % 4) < 2)
                         .map(|(_, c)| c)
@@ -356,7 +383,7 @@ async fn process_resource_commands(
                         height: image.height(),
                         depth_or_array_layers: 1,
                     },
-                    format,
+                    format: *format,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING
                         | wgpu::TextureUsages::COPY_DST
                         | wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -380,6 +407,41 @@ async fn process_resource_commands(
                     resource_name,
                     GPUResource::Texture(texture),
                 );
+            }
+            ResourceCommandData::SLIDER {
+                default,
+                element_size,
+                offset,
+                ..
+            } => {
+                let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
+                else {
+                    panic!("cannot get uniforms")
+                };
+                // Initialize the buffer with zeros.
+                let buffer_default = if *element_size == 4 {
+                    default.to_le_bytes()
+                } else {
+                    panic!("Unsupported float size for slider")
+                };
+                queue.write_buffer(buffer, *offset as u64, &buffer_default);
+            }
+            ResourceCommandData::COLORPICK {
+                default,
+                element_size,
+                offset,
+            } => {
+                let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
+                else {
+                    panic!("cannot get uniforms")
+                };
+                // Initialize the buffer with zeros.
+                let buffer_default = if *element_size == 4 {
+                    bytemuck::cast_slice(default)
+                } else {
+                    panic!("Unsupported float size for color pick")
+                };
+                queue.write_buffer(buffer, *offset as u64, &buffer_default);
             }
         }
     }
@@ -447,17 +509,6 @@ async fn process_resource_commands(
             mapped_at_creation: false,
             size: PRINTF_BUFFER_SIZE as u64,
             usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
-        })),
-    );
-
-    safe_set(
-        &mut allocated_resources,
-        "uniformInput".to_string(),
-        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            mapped_at_creation: false,
-            size: 8 * 4, //TODO
-            usage: wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST),
         })),
     );
 
@@ -735,7 +786,10 @@ impl State {
             .unwrap();
         let (device, queue) = adapter
             .request_device(
-                &wgpu::DeviceDescriptor::default(),
+                &wgpu::DeviceDescriptor {
+                    required_features: Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+                    ..Default::default()
+                },
                 None, // Trace path
             )
             .await
@@ -758,7 +812,10 @@ impl State {
             compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
 
         let rand_code = compiled_result.out_code;
-        let rand_group_size = compiled_result.entry_group_sizes.get("computeMain").unwrap();
+        let rand_group_size = compiled_result
+            .entry_group_sizes
+            .get("computeMain")
+            .unwrap();
 
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rand float"),
@@ -769,14 +826,15 @@ impl State {
         random_pipeline.create_pipeline_layout(compiled_result.bindings);
 
         // Create the pipeline (without resource bindings for now)
-        random_pipeline.create_pipeline(module, None);
+        random_pipeline.create_pipeline(module, None, None);
 
         let allocated_resources = process_resource_commands(
             &queue,
             &device,
             &compilation.bindings,
-            compilation.resource_commands,
+            &compilation.resource_commands,
             &mut random_pipeline,
+            compilation.uniform_size,
         )
         .await;
 
@@ -800,7 +858,7 @@ impl State {
             });
             let mut pipeline = ComputePipeline::new(device.clone());
             pipeline.create_pipeline_layout(compilation.bindings.clone());
-            pipeline.create_pipeline(module, Some(&allocated_resources));
+            pipeline.create_pipeline(module, Some(&allocated_resources), Some(&shader_name));
             pipeline.set_thread_group_size(thread_group_size);
             compute_pipelines.insert(shader_name, pipeline);
         }
@@ -815,6 +873,9 @@ impl State {
             pass_through_pipeline,
             compute_pipelines,
             call_commands: compilation.call_commands,
+            uniform_components: Arc::new(RefCell::new(get_uniform_sliders(
+                compilation.resource_commands,
+            ))),
             hashed_strings: compilation.hashed_strings,
             allocated_resources,
             mouse_state: MouseState {
@@ -917,6 +978,21 @@ impl State {
         };
         self.queue
             .write_buffer(uniform_input, 0, bytemuck::cast_slice(&time_array));
+
+        for uniform_component in self.uniform_components.borrow_mut().iter() {
+            match uniform_component {
+                UniformController::SLIDER { value, buffer_offset, .. } => {
+                    let slice = [*value];
+                    let uniform_data = bytemuck::cast_slice(&slice);
+                    self.queue.write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                },
+                UniformController::COLORPICK { value, buffer_offset, .. } => {
+                    let slice = [*value];
+                    let uniform_data = bytemuck::cast_slice(&slice);
+                    self.queue.write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                },
+            }
+        }
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
@@ -1125,9 +1201,228 @@ impl State {
     }
 }
 
+struct DebugPanel {
+    uniform_controllers: Arc<RefCell<Vec<UniformController>>>,
+}
+
+pub struct AppState {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub surface_config: wgpu::SurfaceConfiguration,
+    pub surface: wgpu::Surface<'static>,
+    pub scale_factor: f32,
+    pub egui_renderer: EguiRenderer,
+    debug_panel: DebugPanel,
+}
+
+impl AppState {
+    async fn new(
+        instance: &wgpu::Instance,
+        surface: wgpu::Surface<'static>,
+        window: &Window,
+        width: u32,
+        height: u32,
+        debug_panel: DebugPanel,
+    ) -> Self {
+        let power_pref = wgpu::PowerPreference::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: power_pref,
+                force_fallback_adapter: false,
+                compatible_surface: Some(&surface),
+            })
+            .await
+            .expect("Failed to find an appropriate adapter");
+
+        let features = wgpu::Features::empty();
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: None,
+                    required_features: features,
+                    required_limits: Default::default(),
+                    memory_hints: Default::default(),
+                },
+                None,
+            )
+            .await
+            .expect("Failed to create device");
+
+        let swapchain_capabilities = surface.get_capabilities(&adapter);
+        let selected_format = wgpu::TextureFormat::Bgra8UnormSrgb;
+        let swapchain_format = swapchain_capabilities
+            .formats
+            .iter()
+            .find(|d| **d == selected_format)
+            .expect("failed to select proper surface texture format!");
+
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: *swapchain_format,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::AutoVsync,
+            desired_maximum_frame_latency: 0,
+            alpha_mode: swapchain_capabilities.alpha_modes[0],
+            view_formats: vec![],
+        };
+
+        surface.configure(&device, &surface_config);
+
+        let egui_renderer = EguiRenderer::new(&device, surface_config.format, None, 1, window);
+
+        let scale_factor = 1.0;
+
+        Self {
+            device,
+            queue,
+            surface,
+            surface_config,
+            egui_renderer,
+            scale_factor,
+            debug_panel,
+        }
+    }
+
+    fn resize_surface(&mut self, width: u32, height: u32) {
+        self.surface_config.width = width;
+        self.surface_config.height = height;
+        self.surface.configure(&self.device, &self.surface_config);
+    }
+}
+
 #[derive(Default)]
 struct App {
+    instance: wgpu::Instance,
     state: Option<State>,
+    debug_app: Option<AppState>,
+    debug_window: Option<Arc<Window>>,
+}
+impl App {
+    fn new() -> Self {
+        let instance = egui_wgpu::wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        Self {
+            instance: instance,
+            state: None,
+            debug_app: None,
+            debug_window: None,
+        }
+    }
+
+    async fn set_window(&mut self, window: Window) {
+        let window = Arc::new(window);
+        let initial_width = 1360;
+        let initial_height = 768;
+
+        let _ = window.request_inner_size(PhysicalSize::new(initial_width, initial_height));
+
+        let surface = self
+            .instance
+            .create_surface(window.clone())
+            .expect("Failed to create surface!");
+
+        let debug_panel = DebugPanel {
+            uniform_controllers: self.state.as_ref().unwrap().uniform_components.clone(),
+        };
+
+        let debug_state = AppState::new(
+            &self.instance,
+            surface,
+            &window,
+            initial_width,
+            initial_width,
+            debug_panel,
+        )
+        .await;
+
+        self.debug_window.get_or_insert(window);
+        self.debug_app.get_or_insert(debug_state);
+    }
+
+    fn handle_resized(&mut self, width: u32, height: u32) {
+        if width > 0 && height > 0 {
+            self.debug_app.as_mut().unwrap().resize_surface(width, height);
+        }
+    }
+
+    fn handle_redraw(&mut self) {
+        // Attempt to handle minimizing window
+        if let Some(window) = self.debug_window.as_ref() {
+            if let Some(min) = window.is_minimized() {
+                if min {
+                    println!("Window is minimized");
+                    return;
+                }
+            }
+        }
+
+        let state = self.debug_app.as_mut().unwrap();
+
+        let screen_descriptor = ScreenDescriptor {
+            size_in_pixels: [state.surface_config.width, state.surface_config.height],
+            pixels_per_point: self.debug_window.as_ref().unwrap().scale_factor() as f32
+                * state.scale_factor,
+        };
+
+        let surface_texture = state.surface.get_current_texture();
+
+        match surface_texture {
+            Err(SurfaceError::Outdated) => {
+                // Ignoring outdated to allow resizing and minimization
+                println!("wgpu surface outdated");
+                return;
+            }
+            Err(_) => {
+                surface_texture.expect("Failed to acquire next swap chain texture");
+                return;
+            }
+            Ok(_) => {}
+        };
+
+        let surface_texture = surface_texture.unwrap();
+
+        let surface_view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = state
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        let window = self.debug_window.as_ref().unwrap();
+
+        {
+            state.egui_renderer.begin_frame(window);
+            egui::CentralPanel::default().show(state.egui_renderer.context(), |ui| {
+                ui.heading("Uniforms:");
+
+                for uniform_controller in state.debug_panel.uniform_controllers.borrow_mut().iter_mut() {
+                    match uniform_controller {
+                        UniformController::SLIDER { name, value, min, max, .. } => {
+                            ui.label(name.as_str());
+                            ui.add(Slider::new(value, *min..=*max));
+                        },
+                        UniformController::COLORPICK { name, value, .. } => {
+                            ui.label(name.as_str());
+                            ui.color_edit_button_rgb(value);
+                        },
+                    }
+                }
+            });
+
+            state.egui_renderer.end_frame_and_draw(
+                &state.device,
+                &state.queue,
+                &mut encoder,
+                window,
+                &surface_view,
+                screen_descriptor,
+            );
+        }
+
+        state.queue.submit(Some(encoder.finish()));
+        surface_texture.present();
+    }
 }
 
 impl ApplicationHandler for App {
@@ -1142,16 +1437,47 @@ impl ApplicationHandler for App {
         let state = pollster::block_on(State::new(window.clone()));
         self.state = Some(state);
 
+        let debug_window = event_loop
+                .create_window(
+                    Window::default_attributes().with_title("Slang Native Playground Debug"),
+                )
+                .unwrap();
+        pollster::block_on(self.set_window(debug_window));
+
         window.request_redraw();
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if id == self.debug_window.as_ref().unwrap().id() {
+            self.debug_app
+                .as_mut()
+                .unwrap()
+                .egui_renderer
+                .handle_input(self.debug_window.as_ref().unwrap(), &event);
+
+            match event {
+                WindowEvent::CloseRequested => {
+                    println!("The close button was pressed; stopping");
+                    event_loop.exit();
+                }
+                WindowEvent::RedrawRequested => {
+                    self.handle_redraw();
+    
+                    self.debug_window.as_ref().unwrap().request_redraw();
+                }
+                WindowEvent::Resized(new_size) => {
+                    self.handle_resized(new_size.width, new_size.height);
+                }
+                _ => (),
+            }
+            return;
+        }
         let state = self.state.as_mut().unwrap();
         match event {
             WindowEvent::CloseRequested => {
                 println!("The close button was pressed; stopping");
                 event_loop.exit();
-            }
+            },
             WindowEvent::RedrawRequested => {
                 state.render();
                 // Emits a new redraw requested event.
@@ -1184,6 +1510,12 @@ impl ApplicationHandler for App {
             _ => (),
         }
     }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        let state = self.state.as_mut().unwrap();
+        state.render();
+        state.get_window().request_redraw();
+    }
 }
 
 fn main() {
@@ -1207,6 +1539,6 @@ fn main() {
     // the background.
     // event_loop.set_control_flow(ControlFlow::Wait);
 
-    let mut app = App::default();
+    let mut app = App::new();
     event_loop.run_app(&mut app).unwrap();
 }

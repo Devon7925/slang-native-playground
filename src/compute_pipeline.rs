@@ -51,13 +51,13 @@ impl ComputePipeline {
         self.pipeline_layout = Some(layout);
     }
 
-    pub fn create_pipeline(&mut self, shader_module: wgpu::ShaderModule, resources: Option<&HashMap<String, GPUResource>>) {
+    pub fn create_pipeline(&mut self, shader_module: wgpu::ShaderModule, resources: Option<&HashMap<String, GPUResource>>, entry_point: Option<&str>) {
         let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("compute pipeline"),
             layout: Some(self.pipeline_layout.as_ref().unwrap()),
             module: &shader_module,
             cache: None,
-            entry_point: None,
+            entry_point,
             compilation_options: Default::default(),
         });
 
