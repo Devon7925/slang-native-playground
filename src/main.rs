@@ -9,8 +9,7 @@ use egui_wgpu::ScreenDescriptor;
 use rand::Rng;
 use regex::Regex;
 use slang_compiler::{
-    get_uniform_sliders, CallCommand, ResourceCommand, ResourceCommandData, SlangCompiler,
-    UniformController,
+    CallCommand, CompilationResult, ResourceCommand, ResourceCommandData, UniformController
 };
 use tokio::runtime;
 use url::{ParseError, Url};
@@ -54,7 +53,7 @@ struct State {
     compute_pipelines: HashMap<String, ComputePipeline>,
     call_commands: Vec<CallCommand>,
     uniform_components: Arc<RefCell<Vec<UniformController>>>,
-    hashed_strings: Vec<String>,
+    hashed_strings: HashMap<u32, String>,
     allocated_resources: HashMap<String, GPUResource>,
     mouse_state: MouseState,
 }
@@ -689,17 +688,8 @@ fn format_specifier(
     return formatted_value;
 }
 
-fn hash_to_string(hashed_strings: &Vec<String>, hash: u32) -> String {
-    for i in 0..hashed_strings.len() {
-        if slang::reflection::get_string_hash(hashed_strings[i].as_str()) == hash {
-            return hashed_strings[i].clone();
-        }
-    }
-    panic!("Invalid string hash!");
-}
-
 fn parse_printf_buffer(
-    hashed_string: &Vec<String>,
+    hashed_strings: &HashMap<u32, String>,
     printf_value_resource: &wgpu::Buffer,
     buffer_element_size: usize,
 ) -> Vec<String> {
@@ -720,15 +710,12 @@ fn parse_printf_buffer(
         match printf_buffer_array[offset] {
             1 => {
                 // format string
-                format_string = hash_to_string(hashed_string, printf_buffer_array[offset + 1] << 0);
+                format_string = hashed_strings.get(&(printf_buffer_array[offset + 1] << 0)).unwrap().clone();
                 // low field
             }
             2 => {
                 // normal string
-                data_array.push(hash_to_string(
-                    hashed_string,
-                    printf_buffer_array[offset + 1] << 0,
-                )); // low field
+                data_array.push(hashed_strings.get(&(printf_buffer_array[offset + 1] << 0)).unwrap().clone()); // low field
             }
             3 => {
                 // integer
@@ -799,8 +786,7 @@ impl State {
 
         let size = window.inner_size();
 
-        let compiler = SlangCompiler::new();
-        let compilation = compiler.compile("shaders", None, "user.slang");
+        let compilation: CompilationResult = ron::from_str(include_str!("../compiled.ron")).unwrap();
 
         let surface = instance.create_surface(window.clone()).unwrap();
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
@@ -808,8 +794,7 @@ impl State {
         let mut random_pipeline = ComputePipeline::new(device.clone());
 
         // Load randFloat shader code from the file.
-        let compiled_result =
-            compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
+        let compiled_result: CompilationResult = ron::from_str(include_str!("../rand_float_compiled.ron")).unwrap();
 
         let rand_code = compiled_result.out_code;
         let rand_group_size = compiled_result
@@ -873,9 +858,7 @@ impl State {
             pass_through_pipeline,
             compute_pipelines,
             call_commands: compilation.call_commands,
-            uniform_components: Arc::new(RefCell::new(get_uniform_sliders(
-                compilation.resource_commands,
-            ))),
+            uniform_components: Arc::new(RefCell::new(compilation.uniform_controllers)),
             hashed_strings: compilation.hashed_strings,
             allocated_resources,
             mouse_state: MouseState {
