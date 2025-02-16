@@ -23,7 +23,7 @@ serde = { version = "1.0.217", features = ["derive"] }
 ron = "0.8.1"
 
 [build-dependencies]
-slang = { path = "../slang-rs" }
+slang = { git = "https://github.com/Devon7925/slang-rs.git" }
 strum = "0.27"
 strum_macros = "0.27"
 regex = "1.11.1"

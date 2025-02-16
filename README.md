@@ -1,6 +1,10 @@
 # Slang Native Playground
 
-A project to allow Slang playground shaders to run outside of a web environment. 
+A project to allow Slang playground shaders to run outside of a web environment. Your user shader can be set in `shaders/user.slang`. It bundles shaders in compilation for easy deployment/sharing.
+
+Use should be as easy as cloning and running `cargo run`.
+
+Depends on (slang-rs)[https://github.com/FloatyMonkey/slang-rs]. See that repo if it is having trouble recognizing your version of Slang.
 
 ## Default Shaders status
 
@@ -24,8 +28,8 @@ A project to allow Slang playground shaders to run outside of a web environment.
 | Graphics Entrypoints | ❌ | Compilation only support not planned |
 | Atomics | ✅ | |
 | | | |
-| BLACK Commands | 📐 | Untested |
-| Uniform Commands | ❌ | Unimplemented |
+| BLACK Commands | ✅ | |
+| Uniform Commands | ✅ | |
 
 
 
