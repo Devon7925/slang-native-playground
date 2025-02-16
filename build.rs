@@ -783,14 +783,16 @@ fn main() {
     println!("cargo::rerun-if-changed=shaders");
 
     let compiler = SlangCompiler::new();
+
+    fs::create_dir_all("compiled_shaders").unwrap();
     
     let compilation = compiler.compile("shaders", None, "user.slang");
     let serialized = ron::ser::to_string_pretty(&compilation, ron::ser::PrettyConfig::default()).unwrap();
-    let mut file = File::create("compiled.ron").unwrap();
+    let mut file = File::create("compiled_shaders/compiled.ron").unwrap();
     file.write_all(serialized.as_bytes()).unwrap();
     
     let rand_float_compilation = compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
     let serialized = ron::ser::to_string_pretty(&rand_float_compilation, ron::ser::PrettyConfig::default()).unwrap();
-    let mut file = File::create("rand_float_compiled.ron").unwrap();
+    let mut file = File::create("compiled_shaders/rand_float_compiled.ron").unwrap();
     file.write_all(serialized.as_bytes()).unwrap();
 }

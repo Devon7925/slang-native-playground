@@ -786,7 +786,7 @@ impl State {
 
         let size = window.inner_size();
 
-        let compilation: CompilationResult = ron::from_str(include_str!("../compiled.ron")).unwrap();
+        let compilation: CompilationResult = ron::from_str(include_str!("../compiled_shaders/compiled.ron")).unwrap();
 
         let surface = instance.create_surface(window.clone()).unwrap();
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
@@ -794,7 +794,7 @@ impl State {
         let mut random_pipeline = ComputePipeline::new(device.clone());
 
         // Load randFloat shader code from the file.
-        let compiled_result: CompilationResult = ron::from_str(include_str!("../rand_float_compiled.ron")).unwrap();
+        let compiled_result: CompilationResult = ron::from_str(include_str!("../compiled_shaders/rand_float_compiled.ron")).unwrap();
 
         let rand_code = compiled_result.out_code;
         let rand_group_size = compiled_result
@@ -1420,18 +1420,20 @@ impl ApplicationHandler for App {
         let state = pollster::block_on(State::new(window.clone()));
         self.state = Some(state);
 
-        let debug_window = event_loop
-                .create_window(
-                    Window::default_attributes().with_title("Slang Native Playground Debug"),
-                )
-                .unwrap();
-        pollster::block_on(self.set_window(debug_window));
+        if cfg!(debug_assertions) {
+            let debug_window = event_loop
+                    .create_window(
+                        Window::default_attributes().with_title("Slang Native Playground Debug"),
+                    )
+                    .unwrap();
+            pollster::block_on(self.set_window(debug_window));
+        }
 
         window.request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        if id == self.debug_window.as_ref().unwrap().id() {
+        if self.debug_window.as_ref().map(|w| w.id() == id).unwrap_or(false) {
             self.debug_app
                 .as_mut()
                 .unwrap()
