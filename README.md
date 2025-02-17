@@ -4,7 +4,7 @@ A project to allow Slang playground shaders to run outside of a web environment.
 
 Use should be as easy as cloning and running `cargo run`.
 
-Depends on (slang-rs)[https://github.com/FloatyMonkey/slang-rs]. See that repo if it is having trouble recognizing your version of Slang.
+Depends on [slang-rs](https://github.com/FloatyMonkey/slang-rs). See that repo if it is having trouble recognizing your version of Slang.
 
 ## Default Shaders status
 
