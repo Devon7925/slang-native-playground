@@ -142,7 +142,11 @@ impl GraphicsPipeline {
         self.bind_group = Some(bind_group);
     }
 
-    pub fn begin_render_pass<'a>(&mut self, encoder: &'a mut wgpu::CommandEncoder, view: &wgpu::TextureView)-> wgpu::RenderPass<'a> {
+    pub fn begin_render_pass<'a>(
+        &mut self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+    ) -> wgpu::RenderPass<'a> {
         let attachment = wgpu::RenderPassColorAttachment {
             view,
             resolve_target: None,

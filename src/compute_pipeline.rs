@@ -13,7 +13,7 @@ pub struct ComputePipeline {
     // // thread group size (array of 3 integers)
     pub thread_group_size: Option<[u64; 3]>,
 
-    // resource name (string) -> binding descriptor 
+    // resource name (string) -> binding descriptor
     resource_bindings: Option<HashMap<String, wgpu::BindGroupLayoutEntry>>,
 }
 
@@ -29,11 +29,14 @@ impl ComputePipeline {
         }
     }
 
-    pub fn set_thread_group_size(&mut self, size: [u64;3]) {
+    pub fn set_thread_group_size(&mut self, size: [u64; 3]) {
         self.thread_group_size = Some(size);
     }
 
-    pub fn create_pipeline_layout(&mut self, resource_descriptors: HashMap<String, wgpu::BindGroupLayoutEntry>) {
+    pub fn create_pipeline_layout(
+        &mut self,
+        resource_descriptors: HashMap<String, wgpu::BindGroupLayoutEntry>,
+    ) {
         self.resource_bindings = Some(resource_descriptors);
 
         let mut entries: Vec<wgpu::BindGroupLayoutEntry> = vec![];
@@ -45,21 +48,35 @@ impl ComputePipeline {
             entries: entries.as_slice(),
         };
 
-        let bind_group_layout = self.device.create_bind_group_layout(&bind_group_layout_descriptor);
-        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { bind_group_layouts: &[&bind_group_layout], ..Default::default() });
+        let bind_group_layout = self
+            .device
+            .create_bind_group_layout(&bind_group_layout_descriptor);
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+                ..Default::default()
+            });
 
         self.pipeline_layout = Some(layout);
     }
 
-    pub fn create_pipeline(&mut self, shader_module: wgpu::ShaderModule, resources: Option<&HashMap<String, GPUResource>>, entry_point: Option<&str>) {
-        let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("compute pipeline"),
-            layout: Some(self.pipeline_layout.as_ref().unwrap()),
-            module: &shader_module,
-            cache: None,
-            entry_point,
-            compilation_options: Default::default(),
-        });
+    pub fn create_pipeline(
+        &mut self,
+        shader_module: wgpu::ShaderModule,
+        resources: Option<&HashMap<String, GPUResource>>,
+        entry_point: Option<&str>,
+    ) {
+        let pipeline = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("compute pipeline"),
+                layout: Some(self.pipeline_layout.as_ref().unwrap()),
+                module: &shader_module,
+                cache: None,
+                entry_point,
+                compilation_options: Default::default(),
+            });
 
         self.pipeline = Some(pipeline);
 
@@ -88,10 +105,18 @@ impl ComputePipeline {
             };
             match resource {
                 GPUResource::Buffer(buffer) => {
-                    entries.push(wgpu::BindGroupEntry { binding: bind_info.binding, resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()) });
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: bind_info.binding,
+                        resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
+                    });
                 }
                 GPUResource::Texture(_) => {
-                    entries.push(wgpu::BindGroupEntry { binding: bind_info.binding, resource: wgpu::BindingResource::TextureView(texture_views.get(tex_idx).unwrap()) });
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: bind_info.binding,
+                        resource: wgpu::BindingResource::TextureView(
+                            texture_views.get(tex_idx).unwrap(),
+                        ),
+                    });
                     tex_idx += 1;
                 }
             }
@@ -102,12 +127,19 @@ impl ComputePipeline {
             let mut missing_entries: Vec<String> = vec![];
             // print out the names of the resources that aren't bound
             for (name, resource) in self.resource_bindings.as_ref().unwrap().iter() {
-                if entries.iter().find(|entry| entry.binding == resource.binding).is_none() {
+                if entries
+                    .iter()
+                    .find(|entry| entry.binding == resource.binding)
+                    .is_none()
+                {
                     missing_entries.push(name.clone());
                 }
             }
 
-            panic!("Cannot create bind-group. The following resources are not bound: {}", missing_entries.join(", "));
+            panic!(
+                "Cannot create bind-group. The following resources are not bound: {}",
+                missing_entries.join(", ")
+            );
         }
 
         self.bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {

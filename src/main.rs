@@ -9,7 +9,7 @@ use egui_wgpu::ScreenDescriptor;
 use rand::Rng;
 use regex::Regex;
 use slang_compiler::{
-    CallCommand, CompilationResult, ResourceCommand, ResourceCommandData, UniformController
+    CallCommand, CompilationResult, ResourceCommand, ResourceCommandData, UniformController,
 };
 use tokio::runtime;
 use url::{ParseError, Url};
@@ -84,6 +84,7 @@ fn create_output_texture(
     device.create_texture(&texture_desc)
 }
 
+#[derive(Debug)]
 enum GPUResource {
     Texture(wgpu::Texture),
     Buffer(wgpu::Buffer),
@@ -710,12 +711,20 @@ fn parse_printf_buffer(
         match printf_buffer_array[offset] {
             1 => {
                 // format string
-                format_string = hashed_strings.get(&(printf_buffer_array[offset + 1] << 0)).unwrap().clone();
+                format_string = hashed_strings
+                    .get(&(printf_buffer_array[offset + 1] << 0))
+                    .unwrap()
+                    .clone();
                 // low field
             }
             2 => {
                 // normal string
-                data_array.push(hashed_strings.get(&(printf_buffer_array[offset + 1] << 0)).unwrap().clone()); // low field
+                data_array.push(
+                    hashed_strings
+                        .get(&(printf_buffer_array[offset + 1] << 0))
+                        .unwrap()
+                        .clone(),
+                ); // low field
             }
             3 => {
                 // integer
@@ -786,7 +795,8 @@ impl State {
 
         let size = window.inner_size();
 
-        let compilation: CompilationResult = ron::from_str(include_str!("../compiled_shaders/compiled.ron")).unwrap();
+        let compilation: CompilationResult =
+            ron::from_str(include_str!("../compiled_shaders/compiled.ron")).unwrap();
 
         let surface = instance.create_surface(window.clone()).unwrap();
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
@@ -794,7 +804,8 @@ impl State {
         let mut random_pipeline = ComputePipeline::new(device.clone());
 
         // Load randFloat shader code from the file.
-        let compiled_result: CompilationResult = ron::from_str(include_str!("../compiled_shaders/rand_float_compiled.ron")).unwrap();
+        let compiled_result: CompilationResult =
+            ron::from_str(include_str!("../compiled_shaders/rand_float_compiled.ron")).unwrap();
 
         let rand_code = compiled_result.out_code;
         let rand_group_size = compiled_result
@@ -964,16 +975,26 @@ impl State {
 
         for uniform_component in self.uniform_components.borrow_mut().iter() {
             match uniform_component {
-                UniformController::SLIDER { value, buffer_offset, .. } => {
+                UniformController::SLIDER {
+                    value,
+                    buffer_offset,
+                    ..
+                } => {
                     let slice = [*value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    self.queue.write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
-                },
-                UniformController::COLORPICK { value, buffer_offset, .. } => {
+                    self.queue
+                        .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                }
+                UniformController::COLORPICK {
+                    value,
+                    buffer_offset,
+                    ..
+                } => {
                     let slice = [*value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    self.queue.write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
-                },
+                    self.queue
+                        .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                }
             }
         }
 
@@ -1142,7 +1163,7 @@ impl State {
                 .map_async(wgpu::MapMode::Read, |result| {
                     let _ = sender.send(result);
                 });
-            self.device.poll(wgpu::Maintain::Wait);
+            self.device.poll(wgpu::PollType::Wait).unwrap();
             let rt = runtime::Builder::new_current_thread().build().unwrap();
             rt.spawn_blocking(|| async {
                 receiver
@@ -1324,7 +1345,10 @@ impl App {
 
     fn handle_resized(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
-            self.debug_app.as_mut().unwrap().resize_surface(width, height);
+            self.debug_app
+                .as_mut()
+                .unwrap()
+                .resize_surface(width, height);
         }
     }
 
@@ -1379,16 +1403,27 @@ impl App {
             egui::CentralPanel::default().show(state.egui_renderer.context(), |ui| {
                 ui.heading("Uniforms:");
 
-                for uniform_controller in state.debug_panel.uniform_controllers.borrow_mut().iter_mut() {
+                for uniform_controller in state
+                    .debug_panel
+                    .uniform_controllers
+                    .borrow_mut()
+                    .iter_mut()
+                {
                     match uniform_controller {
-                        UniformController::SLIDER { name, value, min, max, .. } => {
+                        UniformController::SLIDER {
+                            name,
+                            value,
+                            min,
+                            max,
+                            ..
+                        } => {
                             ui.label(name.as_str());
                             ui.add(Slider::new(value, *min..=*max));
-                        },
+                        }
                         UniformController::COLORPICK { name, value, .. } => {
                             ui.label(name.as_str());
                             ui.color_edit_button_rgb(value);
-                        },
+                        }
                     }
                 }
             });
@@ -1422,10 +1457,10 @@ impl ApplicationHandler for App {
 
         if cfg!(debug_assertions) {
             let debug_window = event_loop
-                    .create_window(
-                        Window::default_attributes().with_title("Slang Native Playground Debug"),
-                    )
-                    .unwrap();
+                .create_window(
+                    Window::default_attributes().with_title("Slang Native Playground Debug"),
+                )
+                .unwrap();
             pollster::block_on(self.set_window(debug_window));
         }
 
@@ -1433,7 +1468,12 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        if self.debug_window.as_ref().map(|w| w.id() == id).unwrap_or(false) {
+        if self
+            .debug_window
+            .as_ref()
+            .map(|w| w.id() == id)
+            .unwrap_or(false)
+        {
             self.debug_app
                 .as_mut()
                 .unwrap()
@@ -1447,7 +1487,7 @@ impl ApplicationHandler for App {
                 }
                 WindowEvent::RedrawRequested => {
                     self.handle_redraw();
-    
+
                     self.debug_window.as_ref().unwrap().request_redraw();
                 }
                 WindowEvent::Resized(new_size) => {
@@ -1462,7 +1502,7 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => {
                 println!("The close button was pressed; stopping");
                 event_loop.exit();
-            },
+            }
             WindowEvent::RedrawRequested => {
                 state.render();
                 // Emits a new redraw requested event.

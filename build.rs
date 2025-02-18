@@ -1,4 +1,7 @@
-use std::{fs::{self, File}, io::Write};
+use std::{
+    fs::{self, File},
+    io::Write,
+};
 
 use regex::Regex;
 use slang::{
@@ -300,10 +303,15 @@ impl SlangCompiler {
         let reflection = linked_program.layout(0).unwrap(); // assume target-index = 0
 
         let mut resource_descriptors = HashMap::new();
+        let mut uniform_input = None;
         for parameter in reflection.parameters() {
             let name = parameter.variable().name().unwrap().to_string();
-            if parameter.category() == ParameterCategory::Uniform { continue }
-
+            if parameter.category() == ParameterCategory::Uniform {
+                if name == "uniformInput" || uniform_input.is_none() {
+                    uniform_input = Some(name);
+                }
+                continue;
+            }
 
             let resource_info =
                 self.get_binding_descriptor(parameter.binding_index(), reflection, parameter);
@@ -316,12 +324,21 @@ impl SlangCompiler {
 
             resource_descriptors.insert(name, binding);
         }
-        resource_descriptors.insert("uniformInput".to_string(), wgpu::BindGroupLayoutEntry {
-            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
-            binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            count: None,
-        });
+        if let Some(uniform_input) = uniform_input {
+            resource_descriptors.insert(
+                uniform_input,
+                wgpu::BindGroupLayoutEntry {
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    count: None,
+                },
+            );
+        }
 
         return resource_descriptors;
     }
@@ -427,7 +444,10 @@ impl SlangCompiler {
                     Some(ResourceCommandData::BLACK {
                         width: width as u32,
                         height: height as u32,
-                        format: get_wgpu_format_from_slang_format(format, parameter.ty().resource_result_type()),
+                        format: get_wgpu_format_from_slang_format(
+                            format,
+                            parameter.ty().resource_result_type(),
+                        ),
                     })
                 } else if playground_attribute_name == "URL" {
                     if parameter.ty().kind() != TypeKind::Resource
@@ -447,7 +467,10 @@ impl SlangCompiler {
 
                     Some(ResourceCommandData::URL {
                         url: attribute.argument_value_string(0).unwrap().to_string(),
-                        format: get_wgpu_format_from_slang_format(format, parameter.ty().resource_result_type()),
+                        format: get_wgpu_format_from_slang_format(
+                            format,
+                            parameter.ty().resource_result_type(),
+                        ),
                     })
                 } else if playground_attribute_name == "SLIDER" {
                     if parameter.ty().kind() != TypeKind::Scalar
@@ -588,23 +611,22 @@ fn round_up_to_nearest(size: u64, arg: u64) -> u64 {
     (size + arg - 1) / arg * arg
 }
 
-fn get_wgpu_format_from_slang_format(format: slang::ImageFormat, resource_type: &slang::reflection::Type) -> wgpu::TextureFormat {
+fn get_wgpu_format_from_slang_format(
+    format: slang::ImageFormat,
+    resource_type: &slang::reflection::Type,
+) -> wgpu::TextureFormat {
     use slang::ImageFormat;
     use wgpu::TextureFormat;
     match format {
-        ImageFormat::SLANGIMAGEFORMATUnknown => {
-            match resource_type.kind() {
-                TypeKind::Vector => todo!(),
-                TypeKind::Scalar => {
-                    match resource_type.scalar_type() {
-                        ScalarType::Int32 => TextureFormat::R32Sint,
-                        ScalarType::Uint32 => TextureFormat::R32Uint,
-                        ScalarType::Float32 => TextureFormat::R32Float,
-                        _ => panic!("Invalid resource type"),
-                    }
-                },
+        ImageFormat::SLANGIMAGEFORMATUnknown => match resource_type.kind() {
+            TypeKind::Vector => todo!(),
+            TypeKind::Scalar => match resource_type.scalar_type() {
+                ScalarType::Int32 => TextureFormat::R32Sint,
+                ScalarType::Uint32 => TextureFormat::R32Uint,
+                ScalarType::Float32 => TextureFormat::R32Float,
                 _ => panic!("Invalid resource type"),
-            }
+            },
+            _ => panic!("Invalid resource type"),
         },
         ImageFormat::SLANGIMAGEFORMATR8Snorm => TextureFormat::R8Snorm,
         ImageFormat::SLANGIMAGEFORMATR8 => TextureFormat::R8Unorm,
@@ -777,7 +799,6 @@ fn get_uniform_sliders(resource_commands: &Vec<ResourceCommand>) -> Vec<UniformC
     return controllers;
 }
 
-
 fn main() {
     // Tell Cargo that if the given file changes, to rerun this build script.
     println!("cargo::rerun-if-changed=shaders");
@@ -785,14 +806,18 @@ fn main() {
     let compiler = SlangCompiler::new();
 
     fs::create_dir_all("compiled_shaders").unwrap();
-    
+
     let compilation = compiler.compile("shaders", None, "user.slang");
-    let serialized = ron::ser::to_string_pretty(&compilation, ron::ser::PrettyConfig::default()).unwrap();
+    let serialized =
+        ron::ser::to_string_pretty(&compilation, ron::ser::PrettyConfig::default()).unwrap();
     let mut file = File::create("compiled_shaders/compiled.ron").unwrap();
     file.write_all(serialized.as_bytes()).unwrap();
-    
-    let rand_float_compilation = compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
-    let serialized = ron::ser::to_string_pretty(&rand_float_compilation, ron::ser::PrettyConfig::default()).unwrap();
+
+    let rand_float_compilation =
+        compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
+    let serialized =
+        ron::ser::to_string_pretty(&rand_float_compilation, ron::ser::PrettyConfig::default())
+            .unwrap();
     let mut file = File::create("compiled_shaders/rand_float_compiled.ron").unwrap();
     file.write_all(serialized.as_bytes()).unwrap();
 }

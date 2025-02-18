@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 env_logger = "0.11.6"
 pollster = "0.4.0"
-wgpu = { version = "24.0.1", features = ["serde"] }
+wgpu = { version = "24.0.0", features = ["serde"] }
 winit = "0.30.9"
 bytemuck = "1.21.0"
 reqwest = { version = "0.12.12", features = ["blocking"] }
@@ -27,6 +27,9 @@ slang = { git = "https://github.com/Devon7925/slang-rs.git" }
 strum = "0.27"
 strum_macros = "0.27"
 regex = "1.11.1"
-wgpu = { version = "24.0.1", features = ["serde"] }
+wgpu = { version = "24.0.0", features = ["serde"] }
 serde = { version = "1.0.217", features = ["derive"] }
 ron = "0.8.1"
+
+[patch.crates-io]
+wgpu = { git = "https://github.com/Devon7925/wgpu.git" }
