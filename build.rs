@@ -361,7 +361,14 @@ impl SlangCompiler {
     ) -> Vec<ResourceCommand> {
         let mut commands: Vec<ResourceCommand> = vec![];
 
-        for parameter in shader_reflection.parameters() {
+        for (parameter_idx, parameter) in shader_reflection
+            .global_params_type_layout()
+            .element_type_layout()
+            .fields().enumerate() {
+            let offset = shader_reflection
+                .global_params_type_layout()
+                .element_type_layout()
+                .field_binding_range_offset(parameter_idx as i64);
             for attribute in parameter.variable().user_attributes() {
                 let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
                 else {
@@ -435,11 +442,10 @@ impl SlangCompiler {
                         )
                     }
 
-                    let bi = parameter.binding_index();
                     let format = shader_reflection
                         .global_params_type_layout()
                         .element_type_layout()
-                        .binding_range_image_format(bi as i64 - 1);
+                        .binding_range_image_format(offset);
 
                     Some(ResourceCommandData::BLACK {
                         width: width as u32,
@@ -459,11 +465,10 @@ impl SlangCompiler {
                         )
                     }
 
-                    let bi = parameter.binding_index();
                     let format = shader_reflection
                         .global_params_type_layout()
                         .element_type_layout()
-                        .binding_range_image_format(bi as i64 - 1);
+                        .binding_range_image_format(offset);
 
                     Some(ResourceCommandData::URL {
                         url: attribute.argument_value_string(0).unwrap().to_string(),
@@ -802,6 +807,7 @@ fn get_uniform_sliders(resource_commands: &Vec<ResourceCommand>) -> Vec<UniformC
 fn main() {
     // Tell Cargo that if the given file changes, to rerun this build script.
     println!("cargo::rerun-if-changed=shaders");
+    println!("cargo::rerun-if-changed=build.rs");
 
     let compiler = SlangCompiler::new();
 
