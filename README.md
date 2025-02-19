@@ -41,7 +41,6 @@ This project uses a fork of the following dependencies:
 | Name | Reason |
 |------|--------|
 | [wgpu](https://github.com/gfx-rs/wgpu) | `textureBarrier` support (used by 2D Splatter example) |
-| [slang-rs](https://github.com/FloatyMonkey/slang-rs) | Missing string hashing(required for print shaders), whole program compilation, and ImageFormats |
 
 I have submitted Pull Requests and the goal is to eventually be able to use official versions.
 

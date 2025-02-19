@@ -602,6 +602,7 @@ fn format_specifier(
     specifier_type: &String,
 ) -> String {
     let mut formatted_value;
+    let was_precision_specified = precision.is_some();
     let precision = precision.unwrap_or(6); //eww magic number
     match specifier_type.as_str() {
         "d" | "i" => {
@@ -647,7 +648,9 @@ fn format_specifier(
         "s" => {
             // String
             formatted_value = value.clone();
-            formatted_value = formatted_value[0..precision as usize].to_string();
+            if was_precision_specified {
+                formatted_value = formatted_value[0..precision as usize].to_string();
+            }
         }
         "%" => {
             // Literal "%"

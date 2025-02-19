@@ -670,7 +670,7 @@ fn get_wgpu_format_from_slang_format(
 fn load_strings(shader_reflection: &Shader) -> HashMap<u32, String> {
     (0..shader_reflection.hashed_string_count())
         .map(|i| shader_reflection.hashed_string(i).unwrap().to_string())
-        .map(|s| (slang::reflection::get_string_hash(s.as_str()), s))
+        .map(|s| (slang::reflection::compute_string_hash(s.as_str()), s))
         .collect()
 }
 
