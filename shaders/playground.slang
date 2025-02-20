@@ -148,3 +148,22 @@ public struct playground_COLOR_PICKAttribute
     float defaultGreen;
     float defaultBlue;
 };
+
+[__AttributeUsage(_AttributeTargets.Function)]
+public struct playground_CALLAttribute
+{
+    int x;
+    int y;
+    int z;
+};
+
+[__AttributeUsage(_AttributeTargets.Function)]
+public struct playground_CALL_SIZE_OFAttribute
+{
+    string resourceName;
+};
+
+[__AttributeUsage(_AttributeTargets.Function)]
+public struct playground_CALL_ONCEAttribute
+{
+};

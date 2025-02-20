@@ -87,5 +87,6 @@ pub enum CallCommandParameters {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CallCommand {
     pub function: String,
+    pub call_once: bool,
     pub parameters: CallCommandParameters,
 }

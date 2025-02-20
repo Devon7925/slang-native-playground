@@ -3,7 +3,6 @@ use std::{
     io::Write,
 };
 
-use regex::Regex;
 use slang::{
     reflection::Shader, Downcast, EntryPoint, GlobalSession, ParameterCategory, ResourceShape,
     ScalarType, TypeKind,
@@ -469,7 +468,7 @@ impl SlangCompiler {
                         .binding_range_image_format(offset);
 
                     Some(ResourceCommandData::URL {
-                        url: attribute.argument_value_string(0).unwrap().to_string(),
+                        url: attribute.argument_value_string(0).unwrap().trim_matches('"').to_string(),
                         format: get_wgpu_format_from_slang_format(
                             format,
                             parameter.ty().resource_result_type(),
@@ -598,7 +597,6 @@ impl SlangCompiler {
         let mut components: Vec<slang::ComponentType> = vec![];
 
         let user_module = slang_session.load_module(entry_module_name).unwrap();
-        let user_source = fs::read_to_string(user_module.file_path()).unwrap();
         self.add_active_entry_points(
             &slang_session,
             &entry_point_name,
@@ -625,7 +623,7 @@ impl SlangCompiler {
         }
 
         let resource_commands = self.resource_commands_from_attributes(shader_reflection);
-        let call_commands = parse_call_commands(user_source, shader_reflection);
+        let call_commands = parse_call_commands(shader_reflection);
 
         return CompilationResult {
             out_code,
@@ -719,65 +717,69 @@ fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {
     }
 }
 
-fn parse_call_commands(user_source: String, reflection: &Shader) -> Vec<CallCommand> {
-    // Look for commands of the form:
-    //
-    // 1. //! CALL(fn-name, SIZE_OF(<resource-name>)) ==> Dispatch a compute pass with the given
-    //                                                    function name and using the resource size
-    //                                                    to determine the work-group size.
-    // 2. //! CALL(fn-name, 512, 512) ==> Dispatch a compute pass with the given function name and
-    //                                    the provided work-group size.
-    //
-
+fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
     let mut call_commands: Vec<CallCommand> = vec![];
-    let lines = user_source.split('\n');
-    let call_regex = Regex::new(r"\/\/!\s+CALL\((\w+),\s*(.*)\)").unwrap();
-    for line in lines {
-        let Some(call_matches) = call_regex.captures(line) else {
-            continue;
-        };
-        let fn_name = call_matches.get(1).unwrap().as_str();
-        let args: Vec<&str> = call_matches
-            .get(2)
-            .unwrap()
-            .as_str()
-            .split(',')
-            .map(|arg| arg.trim())
-            .collect();
-
-        if let Some(resource_name) = args[0]
-            .strip_prefix("SIZE_OF(")
-            .and_then(|rest| rest.strip_suffix(")"))
-        {
-            let Some(resource_reflection) = reflection
-                .parameters()
-                .find(|param| param.variable().name().unwrap() == resource_name)
+    for entry_point in reflection.entry_points() {
+        let fn_name = entry_point.name();
+        let mut call_command = None;
+        let mut call_once = false;
+        for attribute in entry_point.function().user_attributes() {
+            let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
             else {
-                panic!(
-                    "Cannot find resource {} for {} CALL command",
-                    resource_name, fn_name
-                )
+                continue;
             };
-            let mut element_size: Option<u32> = None;
-            if resource_reflection.ty().kind() == TypeKind::Resource
-                && resource_reflection.ty().resource_shape() == ResourceShape::SlangStructuredBuffer
-            {
-                element_size = Some(get_size(resource_reflection.ty().resource_result_type()));
+            if playground_attribute_name == "CALL_SIZE_OF" {
+                if call_command.is_some() {
+                    panic!("Cannot have multiple CALL attributes for the same function");
+                }
+
+                let resource_name = attribute.argument_value_string(0).unwrap().trim_matches('"');
+                let resource_reflection = reflection
+                    .parameters()
+                    .find(|param| param.variable().name().unwrap() == resource_name)
+                    .unwrap();
+
+                let mut element_size: Option<u32> = None;
+                if resource_reflection.ty().kind() == TypeKind::Resource
+                    && resource_reflection.ty().resource_shape() == ResourceShape::SlangStructuredBuffer
+                {
+                    element_size = Some(get_size(resource_reflection.ty().resource_result_type()));
+                }
+
+                call_command = Some(CallCommand {
+                    function: fn_name.to_string(),
+                    call_once: false,
+                    parameters: CallCommandParameters::ResourceBased(
+                        resource_name.to_string(),
+                        element_size,
+                    ),
+                });
+            } else if playground_attribute_name == "CALL" {
+                if call_command.is_some() {
+                    panic!("Cannot have multiple CALL attributes for the same function");
+                }
+
+                let args: Vec<u32> = (0..attribute.argument_count())
+                    .map(|i| attribute.argument_value_int(i).unwrap() as u32)
+                    .collect();
+                call_command = Some(CallCommand {
+                    function: fn_name.to_string(),
+                    call_once: false,
+                    parameters: CallCommandParameters::FixedSize(
+                        args
+                    ),
+                });
+            } else if playground_attribute_name == "CALL_ONCE" {
+                if call_once {
+                    panic!("Cannot have multiple CALL_ONCE attributes for the same function");
+                }
+                call_once = true;
             }
-            call_commands.push(CallCommand {
-                function: fn_name.to_string(),
-                parameters: CallCommandParameters::ResourceBased(
-                    resource_name.to_string(),
-                    element_size,
-                ),
-            });
-        } else {
-            call_commands.push(CallCommand {
-                function: fn_name.to_string(),
-                parameters: CallCommandParameters::FixedSize(
-                    args.iter().map(|arg| arg.parse::<u32>().unwrap()).collect(),
-                ),
-            });
+        }
+
+        if let Some(mut call_command) = call_command {
+            call_command.call_once = call_once;
+            call_commands.push(call_command);
         }
     }
 

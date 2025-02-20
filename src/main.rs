@@ -56,6 +56,7 @@ struct State {
     hashed_strings: HashMap<u32, String>,
     allocated_resources: HashMap<String, GPUResource>,
     mouse_state: MouseState,
+    first_frame: bool,
 }
 
 fn create_output_texture(
@@ -191,9 +192,9 @@ async fn process_resource_commands(
                 rand_float_resources
                     .insert("outputBuffer".to_string(), GPUResource::Buffer(buffer));
 
-                if !rand_float_resources.contains_key("seed") {
+                if !rand_float_resources.contains_key("uniformInput") {
                     rand_float_resources.insert(
-                        "seed".to_string(),
+                        "uniformInput".to_string(),
                         GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
                             label: None,
                             mapped_at_creation: false,
@@ -206,7 +207,7 @@ async fn process_resource_commands(
                 // Set bindings on the pipeline.
                 random_pipeline.create_bind_group(&rand_float_resources);
 
-                let GPUResource::Buffer(seed_buffer) = rand_float_resources.get("seed").unwrap()
+                let GPUResource::Buffer(seed_buffer) = rand_float_resources.get("uniformInput").unwrap()
                 else {
                     panic!("Invalid state");
                 };
@@ -323,7 +324,6 @@ async fn process_resource_commands(
                 if !matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
                     panic!("Resource ${resource_name} is not a texture.");
                 }
-                let url = url.trim_matches('"');
                 let parsed_url = Url::parse(url);
                 let image_bytes = if let Err(ParseError::RelativeUrlWithoutBase) = parsed_url {
                     read(url).unwrap()
@@ -904,6 +904,7 @@ impl State {
                 mouse_clicked: false,
                 is_mouse_down: false,
             },
+            first_frame: true,
         };
 
         // Configure surface for the first time
@@ -1032,6 +1033,9 @@ impl State {
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
         for call_command in self.call_commands.iter() {
+            if !self.first_frame && call_command.call_once {
+                continue;
+            }
             let pipeline = self
                 .compute_pipelines
                 .get(call_command.function.as_str())
@@ -1216,6 +1220,8 @@ impl State {
             printf_buffer_read.unmap();
         }
         surface_texture.present();
+
+        self.first_frame = false;
     }
 
     fn mousedown(&mut self) {
