@@ -1,16 +1,20 @@
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_MOUSEPOSITIONAttribute
+{};
 
-internal struct UniformInput
-{
-    float4 mousePosition;
-    float time;
-}
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_TIMEAttribute
+{};
 
-internal uniform UniformInput uniformInput;
+[playground::MOUSEPOSITION]
+internal uniform float4 mousePosition;
+[playground::TIME]
+internal uniform float time;
 
 // Returns the current time in milliseconds.
 public float getTime()
 {
-    return uniformInput.time;
+    return time;
 }
 
 // Returns mouse position info.
@@ -19,7 +23,7 @@ public float getTime()
 // sign(mouze.z): button is down
 // sign(mouze.w): button is clicked
 //
-public float4 getMousePosition() { return uniformInput.mousePosition; }
+public float4 getMousePosition() { return mousePosition; }
 
 // type field: 1 for format string, 2 for normal string, 3 for integer, 4 for float, 5 for double, 
 struct FormattedStruct

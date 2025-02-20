@@ -9,7 +9,7 @@ use egui_wgpu::ScreenDescriptor;
 use rand::Rng;
 use regex::Regex;
 use slang_compiler::{
-    CallCommand, CompilationResult, ResourceCommand, ResourceCommandData, UniformController,
+    CallCommand, CompilationResult, ResourceCommand, ResourceCommandData, UniformController, UniformControllerType,
 };
 use tokio::runtime;
 use url::{ParseError, Url};
@@ -441,6 +441,28 @@ async fn process_resource_commands(
                 } else {
                     panic!("Unsupported float size for color pick")
                 };
+                queue.write_buffer(buffer, *offset as u64, &buffer_default);
+            }
+            ResourceCommandData::MOUSEPOSITION { offset } => {
+                let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
+                else {
+                    panic!("cannot get uniforms")
+                };
+                // Initialize the buffer with zeros.
+                let buffer_default = [0u8; 8];
+                queue.write_buffer(buffer, *offset as u64, &buffer_default);
+            }
+            ResourceCommandData::TIME { offset } => {
+                let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
+                else {
+                    panic!("cannot get uniforms")
+                };
+                // Initialize the buffer with zeros.
+                let time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs_f32();
+                let buffer_default = time.to_le_bytes();
                 queue.write_buffer(buffer, *offset as u64, &buffer_default);
             }
         }
@@ -952,35 +974,15 @@ impl State {
                 ..Default::default()
             });
 
-        let start = SystemTime::now();
-        let since_the_epoch = start
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards");
-
-        let mut time_array = [0.0f32; 8];
-        time_array[0] = self.mouse_state.last_mouse_down_pos.x as f32;
-        time_array[1] = self.mouse_state.last_mouse_down_pos.y as f32;
-        time_array[2] = self.mouse_state.last_mouse_clicked_pos.x as f32;
-        time_array[3] = self.mouse_state.last_mouse_clicked_pos.y as f32;
-        if self.mouse_state.is_mouse_down {
-            time_array[2] = -time_array[2];
-        }
-        if self.mouse_state.mouse_clicked {
-            time_array[3] = -time_array[3];
-        }
-        time_array[4] = since_the_epoch.as_millis() as u16 as f32 * 0.001;
         let Some(GPUResource::Buffer(uniform_input)) = self.allocated_resources.get("uniformInput")
         else {
             panic!("uniformInput doesn't exist or is of incorrect type");
         };
-        self.queue
-            .write_buffer(uniform_input, 0, bytemuck::cast_slice(&time_array));
 
-        for uniform_component in self.uniform_components.borrow_mut().iter() {
-            match uniform_component {
-                UniformController::SLIDER {
+        for UniformController { buffer_offset, controller, .. } in self.uniform_components.borrow_mut().iter() {
+            match controller {
+                UniformControllerType::SLIDER {
                     value,
-                    buffer_offset,
                     ..
                 } => {
                     let slice = [*value];
@@ -988,12 +990,38 @@ impl State {
                     self.queue
                         .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
                 }
-                UniformController::COLORPICK {
+                UniformControllerType::COLORPICK {
                     value,
-                    buffer_offset,
                     ..
                 } => {
                     let slice = [*value];
+                    let uniform_data = bytemuck::cast_slice(&slice);
+                    self.queue
+                        .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                }
+                UniformControllerType::MOUSEPOSITION => {
+                    let mut time_array = [0.0f32; 8];
+                    time_array[0] = self.mouse_state.last_mouse_down_pos.x as f32;
+                    time_array[1] = self.mouse_state.last_mouse_down_pos.y as f32;
+                    time_array[2] = self.mouse_state.last_mouse_clicked_pos.x as f32;
+                    time_array[3] = self.mouse_state.last_mouse_clicked_pos.y as f32;
+                    if self.mouse_state.is_mouse_down {
+                        time_array[2] = -time_array[2];
+                    }
+                    if self.mouse_state.mouse_clicked {
+                        time_array[3] = -time_array[3];
+                    }
+                    let uniform_data = bytemuck::cast_slice(&time_array);
+                    self.queue
+                        .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                }
+                UniformControllerType::TIME => {
+                    let start = SystemTime::now();
+                    let since_the_epoch = start
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards");
+                    let value = since_the_epoch.as_millis() as u16 as f32 * 0.001;
+                    let slice = [value];
                     let uniform_data = bytemuck::cast_slice(&slice);
                     self.queue
                         .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
@@ -1406,15 +1434,14 @@ impl App {
             egui::CentralPanel::default().show(state.egui_renderer.context(), |ui| {
                 ui.heading("Uniforms:");
 
-                for uniform_controller in state
+                for UniformController { name, controller, .. } in state
                     .debug_panel
                     .uniform_controllers
                     .borrow_mut()
                     .iter_mut()
                 {
-                    match uniform_controller {
-                        UniformController::SLIDER {
-                            name,
+                    match controller {
+                        UniformControllerType::SLIDER {
                             value,
                             min,
                             max,
@@ -1423,9 +1450,12 @@ impl App {
                             ui.label(name.as_str());
                             ui.add(Slider::new(value, *min..=*max));
                         }
-                        UniformController::COLORPICK { name, value, .. } => {
+                        UniformControllerType::COLORPICK { value, .. } => {
                             ui.label(name.as_str());
                             ui.color_edit_button_rgb(value);
+                        }
+                        UniformControllerType::MOUSEPOSITION | UniformControllerType::TIME => {
+                            // do nothing
                         }
                     }
                 }

@@ -303,13 +303,11 @@ impl SlangCompiler {
         let reflection = linked_program.layout(0).unwrap(); // assume target-index = 0
 
         let mut resource_descriptors = HashMap::new();
-        let mut uniform_input = None;
+        let mut uniform_input = false;
         for parameter in reflection.parameters() {
             let name = parameter.variable().name().unwrap().to_string();
             if parameter.category() == ParameterCategory::Uniform {
-                if name == "uniformInput" || uniform_input.is_none() {
-                    uniform_input = Some(name);
-                }
+                uniform_input = true;
                 continue;
             }
 
@@ -324,9 +322,9 @@ impl SlangCompiler {
 
             resource_descriptors.insert(name, binding);
         }
-        if let Some(uniform_input) = uniform_input {
+        if uniform_input {
             resource_descriptors.insert(
-                uniform_input,
+                "uniformInput".to_string(),
                 wgpu::BindGroupLayoutEntry {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -516,6 +514,36 @@ impl SlangCompiler {
                         ],
                         element_size: parameter.type_layout().size(ParameterCategory::Uniform)
                             / parameter.ty().element_count(),
+                        offset: parameter.offset(ParameterCategory::Uniform),
+                    })
+                } else if playground_attribute_name == "MOUSEPOSITION" {
+                    if parameter.ty().kind() != TypeKind::Vector
+                        || parameter.ty().element_count() <= 3
+                        || parameter.ty().element_type().kind() != TypeKind::Scalar
+                        || parameter.ty().element_type().scalar_type() != ScalarType::Float32
+                        || parameter.category_by_index(0) != ParameterCategory::Uniform
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float vectors",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    Some(ResourceCommandData::MOUSEPOSITION {
+                        offset: parameter.offset(ParameterCategory::Uniform),
+                    })
+                } else if playground_attribute_name == "TIME" {
+                    if parameter.ty().kind() != TypeKind::Scalar
+                        || parameter.ty().scalar_type() != ScalarType::Float32
+                        || parameter.category_by_index(0) != ParameterCategory::Uniform
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    Some(ResourceCommandData::TIME {
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else {
@@ -782,22 +810,34 @@ fn get_uniform_sliders(resource_commands: &Vec<ResourceCommand>) -> Vec<UniformC
                 max,
                 offset,
                 ..
-            } => controllers.push(UniformController::SLIDER {
+            } => controllers.push(UniformController {
                 name: resource_command.resource_name.clone(),
-                value: default,
-                min,
-                max,
                 buffer_offset: offset,
+                controller: UniformControllerType::SLIDER {
+                    value: default,
+                    min,
+                    max,
+                },
             }),
             ResourceCommandData::COLORPICK {
                 default, offset, ..
             } => {
-                controllers.push(UniformController::COLORPICK {
+                controllers.push(UniformController {
                     name: resource_command.resource_name.clone(),
-                    value: default,
                     buffer_offset: offset,
+                    controller: UniformControllerType::COLORPICK { value: default },
                 });
             }
+            ResourceCommandData::MOUSEPOSITION { offset } => controllers.push(UniformController {
+                name: resource_command.resource_name.clone(),
+                buffer_offset: offset,
+                controller: UniformControllerType::MOUSEPOSITION,
+            }),
+            ResourceCommandData::TIME { offset } => controllers.push(UniformController {
+                name: resource_command.resource_name.clone(),
+                buffer_offset: offset,
+                controller: UniformControllerType::TIME,
+            }),
             _ => {}
         }
     }

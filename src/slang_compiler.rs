@@ -31,6 +31,12 @@ pub enum ResourceCommandData {
         element_size: usize,
         offset: usize,
     },
+    MOUSEPOSITION {
+        offset: usize,
+    },
+    TIME {
+        offset: usize,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -40,19 +46,24 @@ pub struct ResourceCommand {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub enum UniformController {
+pub struct UniformController {
+    pub name: String,
+    pub buffer_offset: usize,
+    pub controller: UniformControllerType,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub enum UniformControllerType {
     SLIDER {
-        name: String,
         value: f32,
         min: f32,
         max: f32,
-        buffer_offset: usize,
     },
     COLORPICK {
-        name: String,
         value: [f32; 3],
-        buffer_offset: usize,
     },
+    MOUSEPOSITION,
+    TIME,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
