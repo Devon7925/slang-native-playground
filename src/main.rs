@@ -1194,33 +1194,13 @@ impl State {
             drop(pass);
         }
 
-        if let Some(print_compute_pipeline) = self.compute_pipelines.get("printMain") {
+        if self.compute_pipelines.contains_key("printMain") {
             let Some(&GPUResource::Buffer(ref printf_buffer_read)) =
                 self.allocated_resources.get("printfBufferRead")
             else {
-                panic!("outputBuffer is incorrect type or doesn't exist");
+                panic!("printfBufferRead is incorrect type or doesn't exist");
             };
             encoder.clear_buffer(&printf_buffer_read, 0, None);
-
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Compute builtin pass"),
-                timestamp_writes: None,
-            });
-
-            pass.set_bind_group(0, print_compute_pipeline.bind_group.as_ref(), &[]);
-            pass.set_pipeline(print_compute_pipeline.pipeline.as_ref().unwrap());
-
-            let size = [1, 1, 1];
-            let block_size = print_compute_pipeline.thread_group_size.unwrap();
-            let work_group_size: Vec<u32> = size
-                .iter()
-                .zip(block_size.map(|s| s as u32))
-                .map(|(size, block_size)| (size + block_size - 1) / block_size)
-                .collect();
-
-            pass.dispatch_workgroups(work_group_size[0], work_group_size[1], work_group_size[2]);
-            drop(pass);
-
             let Some(&GPUResource::Buffer(ref output_buffer)) =
                 self.allocated_resources.get("outputBuffer")
             else {

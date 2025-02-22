@@ -7,6 +7,8 @@ RWStructuredBuffer<int>               outputBuffer;
 [playground::BLACK_SCREEN(1.0, 1.0)]
 WTexture2D                          outputTexture;
 
+[playground::CALL(1, 1, 1)]
+[playground::CALL::ONCE]
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void printMain(uint3 dispatchThreadID : SV_DispatchThreadID)
