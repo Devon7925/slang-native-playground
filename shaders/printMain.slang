@@ -4,6 +4,7 @@ import playground;
 RWStructuredBuffer<int>               outputBuffer;
 
 [format("rgba8")]
+[playground::BLACK_SCREEN(1.0, 1.0)]
 WTexture2D                          outputTexture;
 
 [shader("compute")]

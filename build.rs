@@ -259,26 +259,28 @@ impl SlangCompiler {
 
         let binding_type = global_layout.descriptor_set_descriptor_range_type(0, index as i64);
 
-        // Special case.. TODO: Remove this as soon as the reflection API properly reports write-only textures.
-        if parameter.variable().name().unwrap() == "outputTexture" {
-            return Some(wgpu::BindingType::StorageTexture {
-                access: wgpu::StorageTextureAccess::WriteOnly,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                view_dimension: wgpu::TextureViewDimension::D2,
-            });
-        }
-
         match binding_type {
             slang::BindingType::Texture => Some(wgpu::BindingType::Texture {
                 multisampled: false,
                 sample_type: wgpu::TextureSampleType::Float { filterable: false },
                 view_dimension: wgpu::TextureViewDimension::D2,
             }),
-            slang::BindingType::MutableTeture => Some(wgpu::BindingType::StorageTexture {
-                access: wgpu::StorageTextureAccess::ReadWrite,
-                format: wgpu::TextureFormat::R32Float,
-                view_dimension: wgpu::TextureViewDimension::D2,
-            }),
+            slang::BindingType::MutableTeture => {
+                let format = global_layout.element_type_layout().binding_range_image_format(index as i64 - 1);
+                Some(wgpu::BindingType::StorageTexture {
+                    access: match parameter.ty().resource_access() {
+                        slang::ResourceAccess::Read => wgpu::StorageTextureAccess::ReadOnly,
+                        slang::ResourceAccess::ReadWrite => wgpu::StorageTextureAccess::ReadWrite,
+                        slang::ResourceAccess::Write => wgpu::StorageTextureAccess::WriteOnly,
+                        _ => panic!("Invalid resource access"),
+                    },
+                    format: get_wgpu_format_from_slang_format(
+                        format,
+                        parameter.ty().resource_result_type(),
+                    ),
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                })
+            },
             slang::BindingType::ConstantBuffer => Some(wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
@@ -447,6 +449,44 @@ impl SlangCompiler {
                     Some(ResourceCommandData::BLACK {
                         width: width as u32,
                         height: height as u32,
+                        format: get_wgpu_format_from_slang_format(
+                            format,
+                            parameter.ty().resource_result_type(),
+                        ),
+                    })
+                } else if playground_attribute_name == "BLACK_SCREEN" {
+                    if parameter.ty().kind() != TypeKind::Resource
+                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports 2D textures",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    let width_scale = attribute.argument_value_float(0).unwrap();
+                    let height_scale = attribute.argument_value_float(1).unwrap();
+                    if width_scale < 0.0 {
+                        panic!(
+                            "{playground_attribute_name} width for {} cannot have negative size",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+                    if height_scale < 0.0 {
+                        panic!(
+                            "{playground_attribute_name} height for {} cannot have negative size",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    let format = shader_reflection
+                        .global_params_type_layout()
+                        .element_type_layout()
+                        .binding_range_image_format(offset);
+
+                    Some(ResourceCommandData::BlackScreen {
+                        width_scale,
+                        height_scale,
                         format: get_wgpu_format_from_slang_format(
                             format,
                             parameter.ty().resource_result_type(),
@@ -650,7 +690,12 @@ fn get_wgpu_format_from_slang_format(
     use wgpu::TextureFormat;
     match format {
         ImageFormat::SLANGIMAGEFORMATUnknown => match resource_type.kind() {
-            TypeKind::Vector => todo!(),
+            TypeKind::Vector => match (resource_type.element_type().scalar_type(), resource_type.element_count()) {
+                (ScalarType::Float32, 2) => TextureFormat::Rg32Float,
+                (ScalarType::Float32, 3) => TextureFormat::Rgba32Float,
+                (ScalarType::Float32, 4) => TextureFormat::Rgba32Float,
+                _ => panic!("Invalid resource type"),
+            },
             TypeKind::Scalar => match resource_type.scalar_type() {
                 ScalarType::Int32 => TextureFormat::R32Sint,
                 ScalarType::Uint32 => TextureFormat::R32Uint,

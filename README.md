@@ -27,9 +27,6 @@ Depends on [slang-rs](https://github.com/FloatyMonkey/slang-rs). See that repo i
 | Automatic Differentiation | ✅ | |
 | Graphics Entrypoints | ❌ | Compilation only support not planned |
 | Atomics | ✅ | |
-| | | |
-| BLACK Commands | ✅ | |
-| Uniform Commands | ✅ | |
 
 
 
@@ -41,6 +38,7 @@ This project uses a fork of the following dependencies:
 | Name | Reason |
 |------|--------|
 | [wgpu](https://github.com/gfx-rs/wgpu) | `textureBarrier` support (used by 2D Splatter example) |
+| [slang-rs](https://github.com/FloatyMonkey/slang-rs) | Expose `ResourceAccess` |
 
 I have submitted Pull Requests and the goal is to eventually be able to use official versions.
 

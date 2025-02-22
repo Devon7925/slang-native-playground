@@ -15,6 +15,11 @@ pub enum ResourceCommandData {
         height: u32,
         format: wgpu::TextureFormat,
     },
+    BlackScreen {
+        width_scale: f32,
+        height_scale: f32,
+        format: wgpu::TextureFormat,
+    },
     URL {
         url: String,
         format: wgpu::TextureFormat,
