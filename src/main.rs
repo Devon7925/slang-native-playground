@@ -515,29 +515,6 @@ async fn process_resource_commands(
     //
     // Some special-case allocations
     //
-
-    safe_set(
-        &mut allocated_resources,
-        "outputBuffer".to_string(),
-        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            mapped_at_creation: false,
-            size: 2 * 2 * 4,
-            usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_SRC),
-        })),
-    );
-
-    safe_set(
-        &mut allocated_resources,
-        "outputBufferRead".to_string(),
-        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            mapped_at_creation: false,
-            size: 2 * 2 * 4,
-            usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
-        })),
-    );
-
     safe_set(
         &mut allocated_resources,
         "g_printedBuffer".to_string(),
@@ -1201,28 +1178,11 @@ impl State {
                 panic!("printfBufferRead is incorrect type or doesn't exist");
             };
             encoder.clear_buffer(&printf_buffer_read, 0, None);
-            let Some(&GPUResource::Buffer(ref output_buffer)) =
-                self.allocated_resources.get("outputBuffer")
-            else {
-                panic!("outputBuffer is incorrect type or doesn't exist");
-            };
-            let Some(&GPUResource::Buffer(ref output_buffer_read)) =
-                self.allocated_resources.get("outputBufferRead")
-            else {
-                panic!("outputBufferRead is incorrect type or doesn't exist");
-            };
             let Some(&GPUResource::Buffer(ref g_printed_buffer)) =
                 self.allocated_resources.get("g_printedBuffer")
             else {
                 panic!("g_printedBuffer is not a buffer");
             };
-            encoder.copy_buffer_to_buffer(
-                &output_buffer,
-                0,
-                &output_buffer_read,
-                0,
-                output_buffer.size(),
-            );
             encoder.copy_buffer_to_buffer(
                 &g_printed_buffer,
                 0,
@@ -1253,7 +1213,7 @@ impl State {
             let Some(&GPUResource::Buffer(ref printf_buffer_read)) =
                 self.allocated_resources.get("printfBufferRead")
             else {
-                panic!("outputBuffer is incorrect type or doesn't exist");
+                panic!("printfBufferRead is incorrect type or doesn't exist");
             };
             let (sender, receiver) = futures_channel::oneshot::channel();
             printf_buffer_read
