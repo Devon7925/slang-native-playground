@@ -4,8 +4,7 @@ use std::{
 };
 
 use slang::{
-    reflection::Shader, Downcast, EntryPoint, GlobalSession, ParameterCategory, ResourceShape,
-    ScalarType, TypeKind,
+    reflection::Shader, Downcast, EntryPoint, GlobalSession, ParameterCategory, ResourceShape, ScalarType, Stage, TypeKind
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -333,7 +332,7 @@ impl SlangCompiler {
                         min_binding_size: None,
                     },
                     binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
+                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::FRAGMENT,
                     count: None,
                 },
             );
@@ -659,11 +658,14 @@ impl SlangCompiler {
         for entry in shader_reflection.entry_points() {
             let group_size = entry.compute_thread_group_size();
             //convert to string
-            entry_group_sizes.insert(entry.name().to_string(), group_size);
+            if entry.stage() == Stage::Compute {
+                entry_group_sizes.insert(entry.name().to_string(), group_size);
+            }
         }
 
         let resource_commands = self.resource_commands_from_attributes(shader_reflection);
         let call_commands = parse_call_commands(shader_reflection);
+        let draw_commands = parse_draw_commands(shader_reflection);
 
         return CompilationResult {
             out_code,
@@ -672,6 +674,7 @@ impl SlangCompiler {
             uniform_controllers: get_uniform_sliders(&resource_commands),
             resource_commands,
             call_commands,
+            draw_commands,
             hashed_strings,
             uniform_size: get_uniform_size(shader_reflection),
         };
@@ -829,6 +832,31 @@ fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
     }
 
     return call_commands;
+}
+
+fn parse_draw_commands(reflection: &Shader) -> Vec<DrawCommand> {
+    let mut draw_commands: Vec<DrawCommand> = vec![];
+    for entry_point in reflection.entry_points() {
+        let fn_name = entry_point.name();
+        for attribute in entry_point.function().user_attributes() {
+            let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
+            else {
+                continue;
+            };
+            if playground_attribute_name == "DRAW" {
+                let vertex_count = attribute.argument_value_int(0).unwrap();
+                let fragment_entrypoint = attribute.argument_value_string(1).unwrap().trim_matches('"');
+
+                draw_commands.push(DrawCommand {
+                    vertex_count: vertex_count as u32,
+                    vertex_entrypoint: fn_name.to_string(),
+                    fragment_entrypoint: fragment_entrypoint.to_string(),
+                });
+            }
+        }
+    }
+
+    return draw_commands;
 }
 
 fn get_uniform_size(shader_reflection: &Shader) -> u64 {

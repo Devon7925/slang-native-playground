@@ -174,3 +174,10 @@ public struct playground_CALL_SIZE_OFAttribute
 public struct playground_CALL_ONCEAttribute
 {
 };
+
+[__AttributeUsage(_AttributeTargets.Function)]
+public struct playground_DRAWAttribute
+{
+    uint vertexCount;
+    string fragmentEntrypoint;
+};

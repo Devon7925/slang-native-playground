@@ -1,36 +1,30 @@
 use std::{collections::HashMap, sync::Arc};
 
+use wgpu::{ColorWrites, FragmentState, VertexState};
+
 use crate::GPUResource;
 
-pub struct ComputePipeline {
+pub struct DrawPipeline {
     pub device: Arc<wgpu::Device>,
 
-    pub pipeline: Option<wgpu::ComputePipeline>,
+    pub pipeline: Option<wgpu::RenderPipeline>,
     pipeline_layout: Option<wgpu::PipelineLayout>,
 
     pub bind_group: Option<wgpu::BindGroup>,
-
-    // // thread group size (array of 3 integers)
-    pub thread_group_size: Option<[u64; 3]>,
 
     // resource name (string) -> binding descriptor
     resource_bindings: Option<HashMap<String, wgpu::BindGroupLayoutEntry>>,
 }
 
-impl ComputePipeline {
+impl DrawPipeline {
     pub fn new(device: Arc<wgpu::Device>) -> Self {
-        ComputePipeline {
+        DrawPipeline {
             device: device,
             pipeline: None,
             pipeline_layout: None,
             bind_group: None,
-            thread_group_size: None,
             resource_bindings: None,
         }
-    }
-
-    pub fn set_thread_group_size(&mut self, size: [u64; 3]) {
-        self.thread_group_size = Some(size);
     }
 
     pub fn create_pipeline_layout(
@@ -65,17 +59,36 @@ impl ComputePipeline {
         &mut self,
         shader_module: &wgpu::ShaderModule,
         resources: Option<&HashMap<String, GPUResource>>,
-        entry_point: Option<&str>,
+        vertex_entry_point: Option<&str>,
+        fragment_entry_point: Option<&str>,
     ) {
         let pipeline = self
             .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("compute pipeline"),
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("graphics pipeline"),
                 layout: Some(self.pipeline_layout.as_ref().unwrap()),
-                module: shader_module,
                 cache: None,
-                entry_point,
-                compilation_options: Default::default(),
+
+                vertex: VertexState {
+                    module: shader_module,
+                    entry_point: vertex_entry_point,
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(FragmentState {
+                    module: shader_module,
+                    entry_point: fragment_entry_point,
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: ColorWrites::all(),
+                    })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
             });
 
         self.pipeline = Some(pipeline);
@@ -147,5 +160,28 @@ impl ComputePipeline {
             layout: &self.pipeline.as_ref().unwrap().get_bind_group_layout(0),
             entries: entries.as_slice(),
         }));
+    }
+
+    pub fn begin_render_pass<'a>(
+        &mut self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+    ) -> wgpu::RenderPass<'a> {
+        let attachment = wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        };
+        let render_pass_descriptor = wgpu::RenderPassDescriptor {
+            label: Some("pass through renderPass"),
+            color_attachments: &[Some(attachment)],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        };
+        encoder.begin_render_pass(&render_pass_descriptor)
     }
 }

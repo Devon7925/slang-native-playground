@@ -1,16 +1,16 @@
 mod compute_pipeline;
+mod draw_pipeline;
 mod egui_tools;
-mod graphics_pipeline;
 mod slang_compiler;
 
+use draw_pipeline::DrawPipeline;
 use egui::Slider;
 use egui_tools::EguiRenderer;
 use egui_wgpu::ScreenDescriptor;
 use rand::Rng;
 use regex::Regex;
 use slang_compiler::{
-    CallCommand, CompilationResult, ResourceCommand, ResourceCommandData, UniformController,
-    UniformControllerType,
+    CallCommand, CompilationResult, DrawCommand, ResourceCommand, ResourceCommandData, UniformController, UniformControllerType
 };
 use tokio::runtime;
 use url::{ParseError, Url};
@@ -26,7 +26,6 @@ use std::{
 };
 
 use compute_pipeline::ComputePipeline;
-use graphics_pipeline::GraphicsPipeline;
 use winit::{
     application::ApplicationHandler,
     dpi::{PhysicalPosition, PhysicalSize},
@@ -50,11 +49,12 @@ struct State {
     size: winit::dpi::PhysicalSize<u32>,
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
-    pass_through_pipeline: GraphicsPipeline,
     compute_pipelines: HashMap<String, ComputePipeline>,
+    draw_pipelines: Vec<DrawPipeline>,
     bindings: HashMap<String, wgpu::BindGroupLayoutEntry>,
     resource_commands: Vec<ResourceCommand>,
     call_commands: Vec<CallCommand>,
+    draw_commands: Vec<DrawCommand>,
     uniform_components: Arc<RefCell<Vec<UniformController>>>,
     hashed_strings: HashMap<u32, String>,
     allocated_resources: HashMap<String, GPUResource>,
@@ -850,7 +850,7 @@ impl State {
         random_pipeline.create_pipeline_layout(compiled_result.bindings);
 
         // Create the pipeline (without resource bindings for now)
-        random_pipeline.create_pipeline(module, None, None);
+        random_pipeline.create_pipeline(&module, None, None);
 
         let allocated_resources = process_resource_commands(
             &queue,
@@ -862,28 +862,26 @@ impl State {
         )
         .await;
 
-        let mut pass_through_pipeline = GraphicsPipeline::new(device.clone());
-        let shader_module = device.create_shader_module(wgpu::include_wgsl!("passThrough.wgsl"));
-        let Some(GPUResource::Texture(input_texture)) =
-            allocated_resources.get(&"outputTexture".to_string())
-        else {
-            panic!("outputTexture is not a Texture");
-        };
-        pass_through_pipeline.create_pipeline(&shader_module, input_texture);
-        pass_through_pipeline.create_bind_group();
-
         let mut compute_pipelines = HashMap::new();
 
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&compilation.out_code.as_str())),
+        });
         for (shader_name, thread_group_size) in compilation.entry_group_sizes {
-            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(shader_name.as_str()),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&compilation.out_code.as_str())),
-            });
             let mut pipeline = ComputePipeline::new(device.clone());
             pipeline.create_pipeline_layout(compilation.bindings.clone());
-            pipeline.create_pipeline(module, Some(&allocated_resources), Some(&shader_name));
+            pipeline.create_pipeline(&module, Some(&allocated_resources), Some(&shader_name));
             pipeline.set_thread_group_size(thread_group_size);
             compute_pipelines.insert(shader_name, pipeline);
+        }
+
+        let mut draw_pipelines = Vec::new();
+        for draw_command in compilation.draw_commands.iter() {
+            let mut pipeline = DrawPipeline::new(device.clone());
+            pipeline.create_pipeline_layout(compilation.bindings.clone());
+            pipeline.create_pipeline(&module, Some(&allocated_resources), Some(&draw_command.vertex_entrypoint), Some(&draw_command.fragment_entrypoint));
+            draw_pipelines.push(pipeline);
         }
 
         let state = State {
@@ -893,11 +891,12 @@ impl State {
             size,
             surface,
             surface_format,
-            pass_through_pipeline,
             compute_pipelines,
+            draw_pipelines,
             bindings: compilation.bindings,
             resource_commands: compilation.resource_commands,
             call_commands: compilation.call_commands,
+            draw_commands: compilation.draw_commands,
             uniform_components: Arc::new(RefCell::new(compilation.uniform_controllers)),
             hashed_strings: compilation.hashed_strings,
             allocated_resources,
@@ -1037,13 +1036,9 @@ impl State {
         for (_, compute_pipeline) in self.compute_pipelines.iter_mut() {
             compute_pipeline.create_bind_group(&self.allocated_resources);
         }
-
-        let Some(GPUResource::Texture(in_tex)) = self.allocated_resources.get("outputTexture")
-        else {
-            panic!("outputTexture is not a Texture");
-        };
-        self.pass_through_pipeline.input_texture = Some(in_tex.clone());
-        self.pass_through_pipeline.create_bind_group();
+        for draw_pipeline in self.draw_pipelines.iter_mut() {
+            draw_pipeline.create_bind_group(&self.allocated_resources);
+        }
     }
 
     fn render(&mut self) {
@@ -1192,19 +1187,15 @@ impl State {
             );
         }
 
-        // Create the renderpass which will clear the screen.
-        let mut renderpass = self
-            .pass_through_pipeline
-            .begin_render_pass(&mut encoder, &texture_view);
+        for (draw_command, pipeline) in self.draw_commands.iter().zip(self.draw_pipelines.iter_mut()) {
+            let mut pass = pipeline.begin_render_pass(&mut encoder, &texture_view);
 
-        renderpass.set_bind_group(0, self.pass_through_pipeline.bind_group.as_ref(), &[]);
-        renderpass.set_pipeline(self.pass_through_pipeline.pipeline.as_ref().unwrap());
+            pass.set_bind_group(0, pipeline.bind_group.as_ref(), &[]);
+            pass.set_pipeline(pipeline.pipeline.as_ref().unwrap());
 
-        // If you wanted to call any drawing commands, they would go here.
-        renderpass.draw(0..6, 0..1);
-
-        // End the renderpass.
-        drop(renderpass);
+            pass.draw(0..draw_command.vertex_count, 0..1);
+            drop(pass);
+        }
 
         // Submit the command in the queue to execute
         self.queue.submit([encoder.finish()]);

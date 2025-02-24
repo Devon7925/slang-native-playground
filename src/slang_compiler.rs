@@ -78,6 +78,7 @@ pub struct CompilationResult {
     pub bindings: HashMap<String, BindGroupLayoutEntry>,
     pub resource_commands: Vec<ResourceCommand>,
     pub call_commands: Vec<CallCommand>,
+    pub draw_commands: Vec<DrawCommand>,
     pub hashed_strings: HashMap<u32, String>,
     pub uniform_size: u64,
     pub uniform_controllers: Vec<UniformController>,
@@ -94,4 +95,11 @@ pub struct CallCommand {
     pub function: String,
     pub call_once: bool,
     pub parameters: CallCommandParameters,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DrawCommand {
+    pub vertex_count: u32,
+    pub vertex_entrypoint: String,
+    pub fragment_entrypoint: String,
 }
