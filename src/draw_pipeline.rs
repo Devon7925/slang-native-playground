@@ -190,7 +190,6 @@ impl DrawPipeline {
     }
 
     pub fn begin_render_pass<'a>(
-        &mut self,
         encoder: &'a mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
     ) -> wgpu::RenderPass<'a> {

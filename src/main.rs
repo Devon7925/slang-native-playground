@@ -1242,24 +1242,19 @@ impl State {
             );
         }
 
-        // Submit the command in the queue to execute
-        self.queue.submit([encoder.finish()]);
-
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-
+        let mut pass = DrawPipeline::begin_render_pass(&mut encoder, &texture_view);
         for (draw_command, pipeline) in self
             .draw_commands
             .iter()
             .zip(self.draw_pipelines.iter_mut())
         {
-            let mut pass = pipeline.begin_render_pass(&mut encoder, &texture_view);
 
             pass.set_bind_group(0, pipeline.bind_group.as_ref(), &[]);
             pass.set_pipeline(pipeline.pipeline.as_ref().unwrap());
 
             pass.draw(0..draw_command.vertex_count, 0..1);
-            drop(pass);
         }
+        drop(pass);
 
         // Submit the command in the queue to execute
         self.queue.submit([encoder.finish()]);
