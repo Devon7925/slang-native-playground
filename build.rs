@@ -4,7 +4,7 @@ use std::{
 };
 
 use slang::{
-    reflection::{Shader, VariableLayout}, Downcast, EntryPoint, GlobalSession, ParameterCategory, ResourceAccess, ResourceShape, ScalarType, Stage, TypeKind
+    reflection::{Shader, VariableLayout}, Downcast, GlobalSession, ParameterCategory, ResourceAccess, ResourceShape, ScalarType, Stage, TypeKind
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -31,10 +31,6 @@ pub struct SlangCompiler {
     // compile_target_map: { name: string, value: number }[] | null,
 }
 
-struct CompiledEntryPoint {
-    module: slang::Module,
-}
-
 impl SlangCompiler {
     pub fn new() -> Self {
         let global_slang_session = slang::GlobalSession::new().unwrap();
@@ -45,82 +41,15 @@ impl SlangCompiler {
         }
     }
 
-    // In our playground, we only allow to run shaders with two entry points: render_main and print_main
-    fn find_runnable_entry_point(&self, module: &slang::Module) -> Option<EntryPoint> {
-        for shader_type in ShaderType::iter() {
-            let entry_point_name = shader_type.get_entry_point_name();
-            if let Some(entry_point) = module.find_entry_point_by_name(entry_point_name) {
-                return Some(entry_point);
-            }
-        }
-
-        return None;
-    }
-
-    fn find_entry_point(
-        &self,
-        module: &slang::Module,
-        entry_point_name: Option<&String>,
-    ) -> Option<EntryPoint> {
-        if entry_point_name.clone().map(|ep| ep == "").unwrap_or(true) {
-            let entry_point = self.find_runnable_entry_point(module);
-            if entry_point.is_none() {
-                // self.diagnostics_msg += "Warning: The current shader code is not runnable because 'image_main' or 'print_main' functions are not found.\n";
-                // self.diagnostics_msg += "Use the 'Compile' button to compile it to different targets.\n";
-                // TODO
-            }
-            return entry_point;
-        } else {
-            let entry_point = module.find_entry_point_by_name(entry_point_name.unwrap().as_str());
-            if entry_point.is_none() {
-                // let error = slang::get_last_error();
-                // panic!(error.type + " error: " + error.message);
-                // self.diagnostics_msg += (error.type + " error: " + error.message);
-                return None; // TODO
-            }
-            return entry_point;
-        }
-    }
-
-    // If user code defines image_main or print_main, we will know the entry point name because they're
-    // already defined in our pre-built module. So we will add those one of those entry points to the
-    // dropdown list. Then, we will find whether user code also defines other entry points, if it has
-    // we will also add them to the dropdown list.
-    fn find_defined_entry_points(&self) -> Vec<String> {
-        let mut result: Vec<String> = vec![];
-
-        let search_path = std::ffi::CString::new("shaders").unwrap();
-
-        // All compiler options are available through this builder.
-        let session_options = slang::CompilerOptions::default()
-            .optimization(slang::OptimizationLevel::High)
-            .matrix_layout_row(true);
-
-        let target_desc = slang::TargetDesc::default()
-            .format(slang::CompileTarget::Wgsl)
-            .profile(self.global_slang_session.find_profile("spirv_1_6"));
-
-        let targets = [target_desc];
-        let search_paths = [search_path.as_ptr()];
-
-        let session_desc = slang::SessionDesc::default()
-            .targets(&targets)
-            .search_paths(&search_paths)
-            .options(&session_options);
-
-        let Some(slang_session) = self.global_slang_session.create_session(&session_desc) else {
-            return vec![];
-        };
-        let module = slang_session.load_module("user.slang").unwrap();
-
-        let count = module.entry_point_count();
+    fn add_components(&self, user_module: slang::Module, slang_session: &slang::Session, component_list: &mut Vec<slang::ComponentType>) {
+        let count = user_module.entry_point_count();
         for i in 0..count {
-            let entry_point = module.entry_point_by_index(i).unwrap();
-            result.push(entry_point.function_reflection().name().to_string());
+            let entry_point = user_module.entry_point_by_index(i).unwrap();
+            component_list.push(entry_point.downcast().clone());
         }
 
         let program = slang_session
-            .create_composite_component_type(&[module.downcast().clone()])
+            .create_composite_component_type(&[user_module.downcast().clone()])
             .unwrap();
         let linked_program = program.link().unwrap();
         let shader_reflection = linked_program.layout(0).unwrap();
@@ -130,113 +59,21 @@ impl SlangCompiler {
                 .find_function_by_name(st.as_str())
                 .is_some()
             {
-                result.push(st);
-            }
-        }
+                let module = slang_session.load_module(format!("{}.slang", st).as_str()).unwrap();
 
-        return result;
-    }
-
-    fn is_runnable_entry_point(entry_point_name: &String) -> bool {
-        return ShaderType::iter().any(|st| st.get_entry_point_name() == entry_point_name);
-    }
-
-    // Since we will not let user to change the entry point code, we can precompile the entry point module
-    // and reuse it for every compilation.
-
-    fn compile_entry_point_module(
-        &self,
-        slang_session: &slang::Session,
-        module_name: &String,
-    ) -> Result<CompiledEntryPoint, slang::Error> {
-        let module = slang_session.load_module(&module_name)?;
-
-        return Ok(CompiledEntryPoint {
-            module,
-        });
-    }
-
-    fn get_precompiled_program(
-        &self,
-        slang_session: &slang::Session,
-        module_name: &String,
-    ) -> Option<CompiledEntryPoint> {
-        if !SlangCompiler::is_runnable_entry_point(&module_name) {
-            return None;
-        }
-
-        let main_module = self.compile_entry_point_module(slang_session, module_name);
-
-        return Some(main_module.unwrap());
-    }
-
-    fn add_active_entry_points(
-        &self,
-        slang_session: &slang::Session,
-        entry_point_name: &Option<String>,
-        user_module: slang::Module,
-        component_list: &mut Vec<slang::ComponentType>,
-    ) -> bool {
-        // For now, we just don't allow user to define image_main or print_main as entry point name for simplicity
-        let count = user_module.entry_point_count();
-        for i in 0..count {
-            let name = user_module
-                .entry_point_by_index(i)
-                .unwrap()
-                .function_reflection()
-                .name()
-                .to_string();
-            if SlangCompiler::is_runnable_entry_point(&name) {
-                // self.diagnostics_msg += "error: Entry point name ${name} is reserved";
-                // TODO
-                return false;
-            }
-        }
-
-        // If entry point is provided, we know for sure this is not a whole program compilation,
-        // so we will just go to find the correct module to include in the compilation.
-        if let Some(entry_point_name) = entry_point_name {
-            if SlangCompiler::is_runnable_entry_point(&entry_point_name) {
-                // we use the same entry point name as module name
-                let Some(main_program) =
-                    self.get_precompiled_program(&slang_session, entry_point_name)
-                else {
-                    return false;
-                };
-
-                component_list.push(main_program.module.downcast().clone());
-            } else {
-                // we know the entry point is from user module
-                let Some(entry_point) = self.find_entry_point(&user_module, Some(entry_point_name))
-                else {
-                    return false;
-                };
-
-                component_list.push(entry_point.downcast().clone());
-            }
-        }
-        // otherwise, it's a whole program compilation, we will find all active entry points in the user code
-        // and pre-built modules.
-        else {
-            let results = self.find_defined_entry_points();
-            for result in results {
-                if SlangCompiler::is_runnable_entry_point(&result) {
-                    let Some(main_program) = self.get_precompiled_program(&slang_session, &result)
-                    else {
-                        return false;
-                    };
-                    component_list.push(main_program.module.downcast().clone());
-                } else {
-                    let Some(entry_point) = self.find_entry_point(&user_module, Some(&result))
-                    else {
-                        return false;
-                    };
-
+                component_list.push(module.downcast().clone());
+        
+                let count = module.entry_point_count();
+                for i in 0..count {
+                    let entry_point = module.entry_point_by_index(i).unwrap();
                     component_list.push(entry_point.downcast().clone());
                 }
             }
         }
-        return true;
+    }
+
+    fn is_runnable_entry_point(entry_point_name: &String) -> bool {
+        return ShaderType::iter().any(|st| st.get_entry_point_name() == entry_point_name);
     }
 
     fn get_binding_descriptor(
@@ -632,7 +469,6 @@ impl SlangCompiler {
     pub fn compile(
         &self,
         search_path: &str,
-        entry_point_name: Option<String>,
         entry_module_name: &str,
     ) -> CompilationResult {
         let search_path = std::ffi::CString::new(search_path).unwrap();
@@ -665,12 +501,23 @@ impl SlangCompiler {
         let mut components: Vec<slang::ComponentType> = vec![];
 
         let user_module = slang_session.load_module(entry_module_name).unwrap();
-        self.add_active_entry_points(
-            &slang_session,
-            &entry_point_name,
-            user_module,
-            &mut components,
-        );
+
+        // For now, we just don't allow user to define image_main or print_main as entry point name for simplicity
+        let count = user_module.entry_point_count();
+        for i in 0..count {
+            let name = user_module
+                .entry_point_by_index(i)
+                .unwrap()
+                .function_reflection()
+                .name()
+                .to_string();
+            if SlangCompiler::is_runnable_entry_point(&name) {
+                panic!("User defined playground entrypoint {}", name)
+            }
+        }
+
+        self.add_components(user_module, &slang_session, &mut components);
+
         let program = slang_session
             .create_composite_component_type(components.as_slice())
             .unwrap();
@@ -976,14 +823,14 @@ fn main() {
 
     fs::create_dir_all("compiled_shaders").unwrap();
 
-    let compilation = compiler.compile("shaders", None, "user.slang");
+    let compilation = compiler.compile("shaders", "user.slang");
     let serialized =
         ron::ser::to_string_pretty(&compilation, ron::ser::PrettyConfig::default()).unwrap();
     let mut file = File::create("compiled_shaders/compiled.ron").unwrap();
     file.write_all(serialized.as_bytes()).unwrap();
 
     let rand_float_compilation =
-        compiler.compile("demos", Some("computeMain".to_string()), "rand_float.slang");
+        compiler.compile("demos", "rand_float.slang");
     let serialized =
         ron::ser::to_string_pretty(&rand_float_compilation, ron::ser::PrettyConfig::default())
             .unwrap();

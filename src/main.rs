@@ -1135,18 +1135,18 @@ impl State {
                         .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
                 }
                 UniformControllerType::MOUSEPOSITION => {
-                    let mut time_array = [0.0f32; 8];
-                    time_array[0] = self.mouse_state.last_mouse_down_pos.x as f32;
-                    time_array[1] = self.mouse_state.last_mouse_down_pos.y as f32;
-                    time_array[2] = self.mouse_state.last_mouse_clicked_pos.x as f32;
-                    time_array[3] = self.mouse_state.last_mouse_clicked_pos.y as f32;
+                    let mut mouse_array = [0.0f32; 4];
+                    mouse_array[0] = self.mouse_state.last_mouse_down_pos.x as f32;
+                    mouse_array[1] = self.mouse_state.last_mouse_down_pos.y as f32;
+                    mouse_array[2] = self.mouse_state.last_mouse_clicked_pos.x as f32;
+                    mouse_array[3] = self.mouse_state.last_mouse_clicked_pos.y as f32;
                     if self.mouse_state.is_mouse_down {
-                        time_array[2] = -time_array[2];
+                        mouse_array[2] = -mouse_array[2];
                     }
                     if self.mouse_state.mouse_clicked {
-                        time_array[3] = -time_array[3];
+                        mouse_array[3] = -mouse_array[3];
                     }
-                    let uniform_data = bytemuck::cast_slice(&time_array);
+                    let uniform_data = bytemuck::cast_slice(&mouse_array);
                     self.queue
                         .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
                 }
