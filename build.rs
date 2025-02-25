@@ -4,7 +4,7 @@ use std::{
 };
 
 use slang::{
-    reflection::Shader, Downcast, EntryPoint, GlobalSession, ParameterCategory, ResourceShape, ScalarType, Stage, TypeKind
+    reflection::{Shader, VariableLayout}, Downcast, EntryPoint, GlobalSession, ParameterCategory, ResourceAccess, ResourceShape, ScalarType, Stage, TypeKind
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -33,7 +33,6 @@ pub struct SlangCompiler {
 
 struct CompiledEntryPoint {
     module: slang::Module,
-    entry_point: slang::EntryPoint,
 }
 
 impl SlangCompiler {
@@ -152,14 +151,8 @@ impl SlangCompiler {
     ) -> Result<CompiledEntryPoint, slang::Error> {
         let module = slang_session.load_module(&module_name)?;
 
-        // we use the same entry point name as module name
-        let Some(entry_point) = self.find_entry_point(&module, Some(module_name)) else {
-            panic!("Could not find entry point {}", module_name);
-        };
-
         return Ok(CompiledEntryPoint {
             module,
-            entry_point,
         });
     }
 
@@ -212,7 +205,6 @@ impl SlangCompiler {
                 };
 
                 component_list.push(main_program.module.downcast().clone());
-                component_list.push(main_program.entry_point.downcast().clone());
             } else {
                 // we know the entry point is from user module
                 let Some(entry_point) = self.find_entry_point(&user_module, Some(entry_point_name))
@@ -234,7 +226,6 @@ impl SlangCompiler {
                         return false;
                     };
                     component_list.push(main_program.module.downcast().clone());
-                    component_list.push(main_program.entry_point.downcast().clone());
                 } else {
                     let Some(entry_point) = self.find_entry_point(&user_module, Some(&result))
                     else {
@@ -292,13 +283,22 @@ impl SlangCompiler {
                     min_binding_size: None,
                 })
             }
-            _ => None,
+            slang::BindingType::Sampler => {
+                Some(
+                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering)
+                )
+            }
+            a => {
+                println!("cargo::warning=Could not generate binding for {:?}", a);
+                None
+            },
         }
     }
 
     fn get_resource_bindings(
         &self,
         linked_program: &slang::ComponentType,
+        resource_commands: &HashMap<String, ResourceCommandData>,
     ) -> HashMap<String, wgpu::BindGroupLayoutEntry> {
         let reflection = linked_program.layout(0).unwrap(); // assume target-index = 0
 
@@ -313,10 +313,20 @@ impl SlangCompiler {
 
             let resource_info =
                 self.get_binding_descriptor(parameter.binding_index(), reflection, parameter);
+            let mut visibility = wgpu::ShaderStages::NONE;
+            println!("cargo::warning={}, bi={}, tk={:?}", name, parameter.binding_index(), parameter.ty().kind());
+            if resource_commands.get(&name).map(|c| is_available_in_compute(c)).unwrap_or(true) {
+                visibility |= wgpu::ShaderStages::COMPUTE;
+                println!("cargo::warning=made computable {}", name);
+            }
+            if is_available_in_graphics(parameter) {
+                visibility |= wgpu::ShaderStages::VERTEX_FRAGMENT;
+                println!("cargo::warning=made visible {}", name);
+            }
             let binding = wgpu::BindGroupLayoutEntry {
                 ty: resource_info.unwrap(),
                 binding: parameter.binding_index(),
-                visibility: wgpu::ShaderStages::COMPUTE,
+                visibility,
                 count: None,
             };
 
@@ -332,7 +342,7 @@ impl SlangCompiler {
                         min_binding_size: None,
                     },
                     binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX_FRAGMENT,
                     count: None,
                 },
             );
@@ -356,8 +366,8 @@ impl SlangCompiler {
     fn resource_commands_from_attributes(
         &self,
         shader_reflection: &Shader,
-    ) -> Vec<ResourceCommand> {
-        let mut commands: Vec<ResourceCommand> = vec![];
+    ) -> HashMap<String, ResourceCommandData> {
+        let mut commands: HashMap<String, ResourceCommandData> = HashMap::new();
 
         for (parameter_idx, parameter) in shader_reflection
             .global_params_type_layout()
@@ -392,6 +402,15 @@ impl SlangCompiler {
                         count: count as u32,
                         element_size: get_size(parameter.ty().resource_result_type()),
                     })
+                } else if playground_attribute_name == "SAMPLER" {
+                    if parameter.ty().kind() != TypeKind::SamplerState
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports samplers",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+                    Some(ResourceCommandData::Sampler)
                 } else if playground_attribute_name == "RAND" {
                     if parameter.ty().kind() != TypeKind::Resource
                         || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
@@ -513,6 +532,19 @@ impl SlangCompiler {
                             parameter.ty().resource_result_type(),
                         ),
                     })
+                } else if playground_attribute_name == "REBIND_FOR_DRAW" {
+                    if parameter.ty().kind() != TypeKind::Resource
+                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
+                    {
+                        panic!(
+                            "REBIND_FOR_DRAW attribute cannot be applied to {}, it only supports 2D textures",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    Some(ResourceCommandData::RebindForDraw {
+                        original_texture: attribute.argument_value_string(0).unwrap().trim_matches('"').to_string(),
+                    })
                 } else if playground_attribute_name == "SLIDER" {
                     if parameter.ty().kind() != TypeKind::Scalar
                         || parameter.ty().scalar_type() != ScalarType::Float32
@@ -589,10 +621,7 @@ impl SlangCompiler {
                 };
 
                 if let Some(command) = command {
-                    commands.push(ResourceCommand {
-                        resource_name: parameter.variable().name().unwrap().to_string(),
-                        command_data: command,
-                    });
+                    commands.insert(parameter.variable().name().unwrap().to_string(), command);
                 }
             }
         }
@@ -647,8 +676,6 @@ impl SlangCompiler {
             .unwrap();
         let linked_program = program.link().unwrap();
 
-        let bindings = self.get_resource_bindings(&linked_program);
-
         let shader_reflection = linked_program.layout(0).unwrap();
         let hashed_strings = load_strings(shader_reflection);
         let out_code = linked_program.target_code(0).unwrap().as_slice().to_vec();
@@ -667,6 +694,8 @@ impl SlangCompiler {
         let call_commands = parse_call_commands(shader_reflection);
         let draw_commands = parse_draw_commands(shader_reflection);
 
+        let bindings = self.get_resource_bindings(&linked_program, &resource_commands);
+
         return CompilationResult {
             out_code,
             entry_group_sizes,
@@ -679,6 +708,25 @@ impl SlangCompiler {
             uniform_size: get_uniform_size(shader_reflection),
         };
     }
+}
+
+fn is_available_in_compute(resource_command: &ResourceCommandData) -> bool {
+    match resource_command {
+        ResourceCommandData::RebindForDraw { .. } => false,
+        _ => true
+    }
+}
+fn is_available_in_graphics(parameter: &VariableLayout) -> bool {
+    if parameter.ty().kind() == TypeKind::Resource {
+        if parameter.ty().resource_shape() == ResourceShape::SlangTexture2d && parameter.ty().resource_access() != ResourceAccess::Write {
+            return true
+        }
+    } else if parameter.ty().kind() == TypeKind::SamplerState {
+        return true
+    } else if parameter.ty().kind() == TypeKind::ConstantBuffer {
+        return true
+    }
+    false
 }
 
 fn round_up_to_nearest(size: u64, arg: u64) -> u64 {
@@ -875,10 +923,10 @@ fn get_uniform_size(shader_reflection: &Shader) -> u64 {
     return round_up_to_nearest(size, 16);
 }
 
-fn get_uniform_sliders(resource_commands: &Vec<ResourceCommand>) -> Vec<UniformController> {
+fn get_uniform_sliders(resource_commands: &HashMap<String, ResourceCommandData>) -> Vec<UniformController> {
     let mut controllers: Vec<UniformController> = vec![];
-    for resource_command in resource_commands.iter() {
-        match resource_command.command_data {
+    for (resource_name, command_data) in resource_commands.iter() {
+        match command_data {
             ResourceCommandData::SLIDER {
                 default,
                 min,
@@ -886,31 +934,31 @@ fn get_uniform_sliders(resource_commands: &Vec<ResourceCommand>) -> Vec<UniformC
                 offset,
                 ..
             } => controllers.push(UniformController {
-                name: resource_command.resource_name.clone(),
-                buffer_offset: offset,
+                name: resource_name.clone(),
+                buffer_offset: *offset,
                 controller: UniformControllerType::SLIDER {
-                    value: default,
-                    min,
-                    max,
+                    value: *default,
+                    min: *min,
+                    max: *max,
                 },
             }),
             ResourceCommandData::COLORPICK {
                 default, offset, ..
             } => {
                 controllers.push(UniformController {
-                    name: resource_command.resource_name.clone(),
-                    buffer_offset: offset,
-                    controller: UniformControllerType::COLORPICK { value: default },
+                    name: resource_name.clone(),
+                    buffer_offset: *offset,
+                    controller: UniformControllerType::COLORPICK { value: *default },
                 });
             }
             ResourceCommandData::MOUSEPOSITION { offset } => controllers.push(UniformController {
-                name: resource_command.resource_name.clone(),
-                buffer_offset: offset,
+                name: resource_name.clone(),
+                buffer_offset: *offset,
                 controller: UniformControllerType::MOUSEPOSITION,
             }),
             ResourceCommandData::TIME { offset } => controllers.push(UniformController {
-                name: resource_command.resource_name.clone(),
-                buffer_offset: offset,
+                name: resource_name.clone(),
+                buffer_offset: *offset,
                 controller: UniformControllerType::TIME,
             }),
             _ => {}

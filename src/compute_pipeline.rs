@@ -91,7 +91,7 @@ impl ComputePipeline {
         let mut texture_views: Vec<wgpu::TextureView> = vec![];
         for (_, resource) in allocated_resources.iter() {
             match resource {
-                GPUResource::Buffer(_) => {}
+                GPUResource::Buffer(_) | GPUResource::Sampler(_) => {}
                 GPUResource::Texture(texture) => {
                     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                     texture_views.push(texture_view);
@@ -118,6 +118,12 @@ impl ComputePipeline {
                         ),
                     });
                     tex_idx += 1;
+                }
+                GPUResource::Sampler(sampler) => {
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: bind_info.binding,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    });
                 }
             }
         }

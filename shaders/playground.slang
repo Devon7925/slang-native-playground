@@ -141,6 +141,11 @@ public struct playground_RANDAttribute
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_SAMPLERAttribute
+{
+};
+
+[__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_SLIDERAttribute
 {
     float default;
@@ -173,6 +178,12 @@ public struct playground_CALL_SIZE_OFAttribute
 [__AttributeUsage(_AttributeTargets.Function)]
 public struct playground_CALL_ONCEAttribute
 {
+};
+
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_REBIND_FOR_DRAWAttribute
+{
+    string originalTexture;
 };
 
 [__AttributeUsage(_AttributeTargets.Function)]

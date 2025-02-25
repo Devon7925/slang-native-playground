@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use wgpu::{ColorWrites, FragmentState, VertexState};
 
-use crate::GPUResource;
+use crate::{slang_compiler::ResourceCommandData, GPUResource};
 
 pub struct DrawPipeline {
     pub device: Arc<wgpu::Device>,
@@ -59,6 +59,7 @@ impl DrawPipeline {
         &mut self,
         shader_module: &wgpu::ShaderModule,
         resources: Option<&HashMap<String, GPUResource>>,
+        resource_commands: &HashMap<String, ResourceCommandData>,
         vertex_entry_point: Option<&str>,
         fragment_entry_point: Option<&str>,
     ) {
@@ -95,23 +96,26 @@ impl DrawPipeline {
 
         // If resources are provided, create the bind group right away
         if let Some(resources) = resources {
-            self.create_bind_group(resources);
+            self.create_bind_group(resources, resource_commands);
         }
     }
 
-    pub fn create_bind_group(&mut self, allocated_resources: &HashMap<String, GPUResource>) {
+    pub fn create_bind_group(&mut self, allocated_resources: &HashMap<String, GPUResource>, resource_commands: &HashMap<String, ResourceCommandData>) {
         let mut entries: Vec<wgpu::BindGroupEntry> = vec![];
-        let mut texture_views: Vec<wgpu::TextureView> = vec![];
-        for (_, resource) in allocated_resources.iter() {
+        let mut texture_views: HashMap<&String, wgpu::TextureView> = HashMap::new();
+        let mut rebound_textures = HashMap::new();
+        for (name, resource) in allocated_resources.iter() {
             match resource {
-                GPUResource::Buffer(_) => {}
+                GPUResource::Buffer(_) | GPUResource::Sampler(_) => {}
                 GPUResource::Texture(texture) => {
+                    if let Some(ResourceCommandData::RebindForDraw { original_texture }) = resource_commands.get(name) {
+                        rebound_textures.insert(original_texture, name);
+                    }
                     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                    texture_views.push(texture_view);
+                    texture_views.insert(name, texture_view);
                 }
             }
         }
-        let mut tex_idx = 0;
         for (name, resource) in allocated_resources.iter() {
             let Some(bind_info) = self.resource_bindings.as_ref().unwrap().get(name) else {
                 continue;
@@ -124,13 +128,36 @@ impl DrawPipeline {
                     });
                 }
                 GPUResource::Texture(_) => {
+                    if let Some(ResourceCommandData::RebindForDraw { original_texture }) = resource_commands.get(name) {
+                        entries.push(wgpu::BindGroupEntry {
+                            binding: bind_info.binding,
+                            resource: wgpu::BindingResource::TextureView(
+                                texture_views.get(original_texture).unwrap(),
+                            ),
+                        });
+                        continue;
+                    }
+                    if let Some(replacement) = rebound_textures.get(&name) {
+                        entries.push(wgpu::BindGroupEntry {
+                            binding: bind_info.binding,
+                            resource: wgpu::BindingResource::TextureView(
+                                texture_views.get(replacement).unwrap(),
+                            ),
+                        });
+                        continue;
+                    }
+                        entries.push(wgpu::BindGroupEntry {
+                            binding: bind_info.binding,
+                            resource: wgpu::BindingResource::TextureView(
+                                texture_views.get(name).unwrap(),
+                            ),
+                        });
+                }
+                GPUResource::Sampler(sampler) => {
                     entries.push(wgpu::BindGroupEntry {
                         binding: bind_info.binding,
-                        resource: wgpu::BindingResource::TextureView(
-                            texture_views.get(tex_idx).unwrap(),
-                        ),
+                        resource: wgpu::BindingResource::Sampler(sampler),
                     });
-                    tex_idx += 1;
                 }
             }
         }

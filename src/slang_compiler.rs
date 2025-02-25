@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use wgpu::BindGroupLayoutEntry;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ResourceCommandData {
     ZEROS {
         count: u32,
@@ -23,6 +23,10 @@ pub enum ResourceCommandData {
     URL {
         url: String,
         format: wgpu::TextureFormat,
+    },
+    Sampler,
+    RebindForDraw {
+        original_texture: String,
     },
     SLIDER {
         default: f32,
@@ -76,7 +80,7 @@ pub struct CompilationResult {
     pub out_code: String,
     pub entry_group_sizes: HashMap<String, [u64; 3]>,
     pub bindings: HashMap<String, BindGroupLayoutEntry>,
-    pub resource_commands: Vec<ResourceCommand>,
+    pub resource_commands: HashMap<String, ResourceCommandData>,
     pub call_commands: Vec<CallCommand>,
     pub draw_commands: Vec<DrawCommand>,
     pub hashed_strings: HashMap<u32, String>,
