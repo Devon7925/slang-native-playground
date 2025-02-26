@@ -32,6 +32,32 @@ Depends on [slang-rs](https://github.com/FloatyMonkey/slang-rs). See that repo i
 
 
 
+## Extra features
+
+This app also has a number of additional features that are not(yet) in the official playground.
+
+### Uniform attributes
+
+* `[playground::TIME]` on a `float` uniform gives the same output as `getTime()`
+* `[playground::MOUSEPOSITION]` on a `float4` uniform gives the same output as `getMousePosition()`
+
+### `playground::BLACK_SCREEN`
+
+Acts the same as `BLACK` but is automatically scaled based on screen size.
+
+### Draw features
+
+* `playground::DRAW` on a vertex shader allows creating a fixed size draw that will run every frame
+* `playground_REBIND_FOR_DRAW` on a texture allows specifying a texture that will mirror another texture so it becomes accessible in a graphics context
+* `playground::SAMPLER` allows a sampler to be used
+
+## Examples
+
+There are examples of use of the extra features in the `examples` folder.
+| Name | Description |
+|------|--------|
+| `cube_raster.slang` | Cube rasterizer with basic lighting |
+
 ## Dependency forks
 
 This project uses a fork of the following dependencies:
