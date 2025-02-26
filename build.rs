@@ -151,14 +151,11 @@ impl SlangCompiler {
             let resource_info =
                 self.get_binding_descriptor(parameter.binding_index(), reflection, parameter);
             let mut visibility = wgpu::ShaderStages::NONE;
-            println!("cargo::warning={}, bi={}, tk={:?}", name, parameter.binding_index(), parameter.ty().kind());
             if resource_commands.get(&name).map(|c| is_available_in_compute(c)).unwrap_or(true) {
                 visibility |= wgpu::ShaderStages::COMPUTE;
-                println!("cargo::warning=made computable {}", name);
             }
             if is_available_in_graphics(parameter) {
                 visibility |= wgpu::ShaderStages::VERTEX_FRAGMENT;
-                println!("cargo::warning=made visible {}", name);
             }
             let binding = wgpu::BindGroupLayoutEntry {
                 ty: resource_info.unwrap(),

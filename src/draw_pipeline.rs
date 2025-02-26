@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use wgpu::{ColorWrites, FragmentState, VertexState};
+use wgpu::{ColorWrites, DepthStencilState, Device, FragmentState, RenderPassDepthStencilAttachment, VertexState};
 
 use crate::{slang_compiler::ResourceCommandData, GPUResource};
 
@@ -66,7 +66,7 @@ impl DrawPipeline {
         let pipeline = self
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("graphics pipeline"),
+                label: Some(format!("{:?} draw pipeline", vertex_entry_point).as_str()),
                 layout: Some(self.pipeline_layout.as_ref().unwrap()),
                 cache: None,
 
@@ -87,7 +87,13 @@ impl DrawPipeline {
                     })],
                 }),
                 primitive: Default::default(),
-                depth_stencil: None,
+                depth_stencil: Some(DepthStencilState {
+                    format: Self::DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less, // 1.
+                    stencil: wgpu::StencilState::default(), // 2.
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: Default::default(),
                 multiview: None,
             });
@@ -100,7 +106,11 @@ impl DrawPipeline {
         }
     }
 
-    pub fn create_bind_group(&mut self, allocated_resources: &HashMap<String, GPUResource>, resource_commands: &HashMap<String, ResourceCommandData>) {
+    pub fn create_bind_group(
+        &mut self,
+        allocated_resources: &HashMap<String, GPUResource>,
+        resource_commands: &HashMap<String, ResourceCommandData>,
+    ) {
         let mut entries: Vec<wgpu::BindGroupEntry> = vec![];
         let mut texture_views: HashMap<&String, wgpu::TextureView> = HashMap::new();
         let mut rebound_textures = HashMap::new();
@@ -108,7 +118,9 @@ impl DrawPipeline {
             match resource {
                 GPUResource::Buffer(_) | GPUResource::Sampler(_) => {}
                 GPUResource::Texture(texture) => {
-                    if let Some(ResourceCommandData::RebindForDraw { original_texture }) = resource_commands.get(name) {
+                    if let Some(ResourceCommandData::RebindForDraw { original_texture }) =
+                        resource_commands.get(name)
+                    {
                         rebound_textures.insert(original_texture, name);
                     }
                     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -128,7 +140,9 @@ impl DrawPipeline {
                     });
                 }
                 GPUResource::Texture(_) => {
-                    if let Some(ResourceCommandData::RebindForDraw { original_texture }) = resource_commands.get(name) {
+                    if let Some(ResourceCommandData::RebindForDraw { original_texture }) =
+                        resource_commands.get(name)
+                    {
                         entries.push(wgpu::BindGroupEntry {
                             binding: bind_info.binding,
                             resource: wgpu::BindingResource::TextureView(
@@ -146,12 +160,12 @@ impl DrawPipeline {
                         });
                         continue;
                     }
-                        entries.push(wgpu::BindGroupEntry {
-                            binding: bind_info.binding,
-                            resource: wgpu::BindingResource::TextureView(
-                                texture_views.get(name).unwrap(),
-                            ),
-                        });
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: bind_info.binding,
+                        resource: wgpu::BindingResource::TextureView(
+                            texture_views.get(name).unwrap(),
+                        ),
+                    });
                 }
                 GPUResource::Sampler(sampler) => {
                     entries.push(wgpu::BindGroupEntry {
@@ -189,10 +203,28 @@ impl DrawPipeline {
         }));
     }
 
+    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float; // 1
     pub fn begin_render_pass<'a>(
+        device: &Device,
+        size: wgpu::Extent3d,
         encoder: &'a mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
     ) -> wgpu::RenderPass<'a> {
+        let desc = wgpu::TextureDescriptor {
+            label: Some("depth texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT // 3.
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+        let depth_texture = device.create_texture(&desc);
+
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         let attachment = wgpu::RenderPassColorAttachment {
             view,
             resolve_target: None,
@@ -204,7 +236,14 @@ impl DrawPipeline {
         let render_pass_descriptor = wgpu::RenderPassDescriptor {
             label: Some("pass through renderPass"),
             color_attachments: &[Some(attachment)],
-            depth_stencil_attachment: None,
+            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                view: &depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             timestamp_writes: None,
             occlusion_query_set: None,
         };

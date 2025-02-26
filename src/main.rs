@@ -15,7 +15,7 @@ use slang_compiler::{
 };
 use tokio::runtime;
 use url::{ParseError, Url};
-use wgpu::{Features, SurfaceError};
+use wgpu::{Extent3d, Features, SurfaceError};
 
 use std::{
     borrow::Cow,
@@ -1242,7 +1242,11 @@ impl State {
             );
         }
 
-        let mut pass = DrawPipeline::begin_render_pass(&mut encoder, &texture_view);
+        let mut pass = DrawPipeline::begin_render_pass(&self.device, Extent3d {
+            width: surface_texture.texture.width(),
+            height: surface_texture.texture.height(),
+            depth_or_array_layers: 1,
+        }, &mut encoder, &texture_view);
         for (draw_command, pipeline) in self
             .draw_commands
             .iter()
