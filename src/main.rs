@@ -28,12 +28,9 @@ use std::{
 
 use compute_pipeline::ComputePipeline;
 use winit::{
-    application::ApplicationHandler,
-    dpi::{PhysicalPosition, PhysicalSize},
-    event::{ElementState, MouseButton, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowId},
+    application::ApplicationHandler, dpi::{PhysicalPosition, PhysicalSize}, event::{ElementState, MouseButton, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, keyboard::{Key, NamedKey}, window::{Window, WindowId}
 };
+use std::collections::HashSet;
 
 struct MouseState {
     last_mouse_clicked_pos: PhysicalPosition<f64>,
@@ -41,6 +38,26 @@ struct MouseState {
     current_mouse_pos: PhysicalPosition<f64>,
     mouse_clicked: bool,
     is_mouse_down: bool,
+}
+
+struct KeyboardState {
+    pressed_keys: HashSet<Key>,
+}
+
+impl KeyboardState {
+    fn new() -> Self {
+        Self {
+            pressed_keys: HashSet::new(),
+        }
+    }
+
+    fn key_pressed(&mut self, key: Key) {
+        self.pressed_keys.insert(key);
+    }
+
+    fn key_released(&mut self, key: Key) {
+        self.pressed_keys.remove(&key);
+    }
 }
 
 struct State {
@@ -60,6 +77,7 @@ struct State {
     hashed_strings: HashMap<u32, String>,
     allocated_resources: HashMap<String, GPUResource>,
     mouse_state: MouseState,
+    keyboard_state: KeyboardState,
     first_frame: bool,
 }
 
@@ -615,6 +633,16 @@ async fn process_resource_commands(
                     let buffer_default = time.to_le_bytes();
                     queue.write_buffer(buffer, offset as u64, &buffer_default);
                 }
+                ResourceCommandData::KeyInput { offset, .. } => {
+                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput") else {
+                        panic!("cannot get uniforms")
+                    };
+                    // Initialize with key released state (0.0)
+                    let value = 0.0f32;
+                    let slice = [value];
+                    let uniform_data = bytemuck::cast_slice(&slice);
+                    queue.write_buffer(buffer, offset as u64, uniform_data);
+                }
             }
         }
     }
@@ -1037,6 +1065,7 @@ impl State {
                 mouse_clicked: false,
                 is_mouse_down: false,
             },
+            keyboard_state: KeyboardState::new(),
             first_frame: true,
         };
 
@@ -1232,6 +1261,28 @@ impl State {
                     self.queue
                         .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
                 }
+                UniformControllerType::KeyInput { key } => {
+                    let keycode = match key.to_lowercase().as_str() {
+                        "enter" => Key::Named(NamedKey::Enter),
+                        "space" => Key::Named(NamedKey::Space),
+                        "escape" => Key::Named(NamedKey::Escape),
+                        "backspace" => Key::Named(NamedKey::Backspace),
+                        "tab" => Key::Named(NamedKey::Tab),
+                        "arrowup" => Key::Named(NamedKey::ArrowUp),
+                        "arrowdown" => Key::Named(NamedKey::ArrowDown),
+                        "arrowleft" => Key::Named(NamedKey::ArrowLeft),
+                        "arrowright" => Key::Named(NamedKey::ArrowRight),
+                        k => Key::Character(k.into()),
+                    };
+                    let value = if self.keyboard_state.pressed_keys.contains(&keycode) {
+                        1.0f32
+                    } else {
+                        0.0f32
+                    };
+                    let slice = [value];
+                    let uniform_data = bytemuck::cast_slice(&slice);
+                    self.queue.write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                }
             }
         }
 
@@ -1413,6 +1464,14 @@ impl State {
 
     fn mouseup(&mut self) {
         self.mouse_state.is_mouse_down = false;
+    }
+
+    fn key_pressed(&mut self, key: Key) {
+        self.keyboard_state.key_pressed(key);
+    }
+
+    fn key_released(&mut self, key: Key) {
+        self.keyboard_state.key_released(key);
     }
 }
 
@@ -1633,8 +1692,8 @@ impl App {
                             ui.label(name.as_str());
                             ui.color_edit_button_rgb(value);
                         }
-                        UniformControllerType::MOUSEPOSITION | UniformControllerType::TIME => {
-                            // do nothing
+                        UniformControllerType::MOUSEPOSITION | UniformControllerType::TIME | UniformControllerType::KeyInput { .. } => {
+                            // do nothing for these types as they are internally managed
                         }
                     }
                 }
@@ -1742,6 +1801,17 @@ impl ApplicationHandler for App {
                     } else {
                         state.mouseup();
                     }
+                }
+            }
+            WindowEvent::KeyboardInput { 
+                event,
+                device_id: _,
+                is_synthetic: _,
+            } => {
+                let keycode = event.logical_key;
+                match event.state {
+                    ElementState::Pressed => state.key_pressed(keycode),
+                    ElementState::Released => state.key_released(keycode),
                 }
             }
             _ => (),

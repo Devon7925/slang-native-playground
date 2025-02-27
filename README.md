@@ -48,12 +48,24 @@ Acts the same as `BLACK` but is automatically scaled based on screen size.
 ### Draw features
 
 * `playground::DRAW` on a vertex shader allows creating a fixed size draw that will run every frame
-* `playground_REBIND_FOR_DRAW` on a texture allows specifying a texture that will mirror another texture so it becomes accessible in a graphics context
+* `playground::REBIND_FOR_DRAW` on a texture allows specifying a texture that will mirror another texture so it becomes accessible in a graphics context
 * `playground::SAMPLER` allows a sampler to be used
 
 ### `playground::CALL_INDIRECT`
 
 Takes a buffer and a offset and makes an indirect dispatch using them. The buffer is not accessible from the shader being called.
+
+### `playground::KEY_INPUT`
+
+Allows to control a uniform float based on a key with `1.0` meaning pressed and `0.0` meaning released.
+
+Example:
+```slang
+[playground::KEY_INPUT("Space")]
+uniform float spacePressed;
+[playground::KEY_INPUT("W")] 
+uniform float wPressed;
+```
 
 ## Examples
 

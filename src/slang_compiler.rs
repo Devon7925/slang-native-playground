@@ -46,6 +46,10 @@ pub enum ResourceCommandData {
     TIME {
         offset: usize,
     },
+    KeyInput {
+        key: String,
+        offset: usize,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -63,16 +67,11 @@ pub struct UniformController {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum UniformControllerType {
-    SLIDER {
-        value: f32,
-        min: f32,
-        max: f32,
-    },
-    COLORPICK {
-        value: [f32; 3],
-    },
+    SLIDER { value: f32, min: f32, max: f32 },
+    COLORPICK { value: [f32; 3] },
     MOUSEPOSITION,
     TIME,
+    KeyInput { key: String },
 }
 
 #[derive(Debug, Deserialize, Serialize)]

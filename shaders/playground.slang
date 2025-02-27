@@ -1,10 +1,18 @@
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_MOUSEPOSITIONAttribute
-{};
+{
+};
 
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_TIMEAttribute
-{};
+{
+};
+
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_KEY_INPUTAttribute
+{
+    string key;
+};
 
 [playground::MOUSEPOSITION]
 internal uniform float4 mousePosition;
@@ -23,9 +31,12 @@ public float getTime()
 // sign(mouze.z): button is down
 // sign(mouze.w): button is clicked
 //
-public float4 getMousePosition() { return mousePosition; }
+public float4 getMousePosition()
+{
+    return mousePosition;
+}
 
-// type field: 1 for format string, 2 for normal string, 3 for integer, 4 for float, 5 for double, 
+// type field: 1 for format string, 2 for normal string, 3 for integer, 4 for float, 5 for double,
 struct FormattedStruct
 {
     uint32_t type = 0xFFFFFFFF;
@@ -46,14 +57,26 @@ interface IPrintf
 
 extension uint : IPrintf
 {
-    uint32_t typeFlag() { return 3;}
-    uint32_t writePrintfWords() { return (uint32_t)this; }
+    uint32_t typeFlag()
+    {
+        return 3;
+    }
+    uint32_t writePrintfWords()
+    {
+        return (uint32_t)this;
+    }
 }
 
 extension int : IPrintf
 {
-    uint32_t typeFlag() { return 3;}
-    uint32_t writePrintfWords() { return (uint32_t)this; }
+    uint32_t typeFlag()
+    {
+        return 3;
+    }
+    uint32_t writePrintfWords()
+    {
+        return (uint32_t)this;
+    }
 }
 
 // extension int64_t : IPrintf
@@ -68,8 +91,14 @@ extension int : IPrintf
 
 extension float : IPrintf
 {
-    uint32_t typeFlag() { return 4;}
-    uint32_t writePrintfWords() { return bit_cast<uint32_t>(this); }
+    uint32_t typeFlag()
+    {
+        return 4;
+    }
+    uint32_t writePrintfWords()
+    {
+        return bit_cast<uint32_t>(this);
+    }
 }
 
 // extension double : IPrintf
@@ -79,19 +108,27 @@ extension float : IPrintf
 
 extension String : IPrintf
 {
-    uint32_t typeFlag() { return 2;}
-    uint32_t writePrintfWords() { return getStringHash(this); }
+    uint32_t typeFlag()
+    {
+        return 2;
+    }
+    uint32_t writePrintfWords()
+    {
+        return getStringHash(this);
+    }
 }
 
-void handleEach<T>(T value, int index) where T :  IPrintf
+void handleEach<T>(T value, int index)
+    where T : IPrintf
 {
     g_printedBuffer[index].type = value.typeFlag();
     g_printedBuffer[index].low = value.writePrintfWords();
 }
 
-public void print<each T>(String format, expand each T values) where T : IPrintf
+public void print<each T>(String format, expand each T values)
+    where T : IPrintf
 {
-    //if (format.length != 0)
+    // if (format.length != 0)
     {
         g_printedBuffer[g_printBufferIndex].type = 1;
         g_printedBuffer[g_printBufferIndex].low = getStringHash(format);
@@ -103,7 +140,8 @@ public void print<each T>(String format, expand each T values) where T : IPrintf
 }
 
 [OverloadRank(1)]
-public void printf<each T>(String format, expand each T values) where T : IPrintf
+public void printf<each T>(String format, expand each T values)
+    where T : IPrintf
 {
     print(format, expand each values);
 }

@@ -458,6 +458,25 @@ impl SlangCompiler {
                     Some(ResourceCommandData::MOUSEPOSITION {
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
+                } else if playground_attribute_name == "KEY_INPUT" {
+                    if parameter.ty().kind() != TypeKind::Scalar
+                        || parameter.ty().scalar_type() != ScalarType::Float32
+                        || parameter.category_by_index(0) != ParameterCategory::Uniform
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    Some(ResourceCommandData::KeyInput {
+                        key: attribute
+                            .argument_value_string(0)
+                            .unwrap()
+                            .trim_matches('"')
+                            .to_string(),
+                        offset: parameter.offset(ParameterCategory::Uniform),
+                    })
                 } else if playground_attribute_name == "TIME" {
                     if parameter.ty().kind() != TypeKind::Scalar
                         || parameter.ty().scalar_type() != ScalarType::Float32
@@ -847,13 +866,11 @@ fn get_uniform_sliders(
             }),
             ResourceCommandData::COLORPICK {
                 default, offset, ..
-            } => {
-                controllers.push(UniformController {
-                    name: resource_name.clone(),
-                    buffer_offset: *offset,
-                    controller: UniformControllerType::COLORPICK { value: *default },
-                });
-            }
+            } => controllers.push(UniformController {
+                name: resource_name.clone(),
+                buffer_offset: *offset,
+                controller: UniformControllerType::COLORPICK { value: *default },
+            }),
             ResourceCommandData::MOUSEPOSITION { offset } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
@@ -863,6 +880,11 @@ fn get_uniform_sliders(
                 name: resource_name.clone(),
                 buffer_offset: *offset,
                 controller: UniformControllerType::TIME,
+            }),
+            ResourceCommandData::KeyInput { key, offset } => controllers.push(UniformController {
+                name: resource_name.clone(),
+                buffer_offset: *offset,
+                controller: UniformControllerType::KeyInput { key: key.clone() },
             }),
             _ => {}
         }
