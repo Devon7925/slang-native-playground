@@ -111,14 +111,14 @@ public void printf<each T>(String format, expand each T values) where T : IPrint
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_ZEROSAttribute
 {
-    int count;
+    uint count;
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_BLACKAttribute
 {
-    int width;
-    int height;
+    uint width;
+    uint height;
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
@@ -137,7 +137,7 @@ public struct playground_URLAttribute
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_RANDAttribute
 {
-    int count;
+    uint count;
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
@@ -164,9 +164,9 @@ public struct playground_COLOR_PICKAttribute
 [__AttributeUsage(_AttributeTargets.Function)]
 public struct playground_CALLAttribute
 {
-    int x;
-    int y;
-    int z;
+    uint x;
+    uint y;
+    uint z;
 };
 
 [__AttributeUsage(_AttributeTargets.Function)]
@@ -178,6 +178,13 @@ public struct playground_CALL_SIZE_OFAttribute
 [__AttributeUsage(_AttributeTargets.Function)]
 public struct playground_CALL_ONCEAttribute
 {
+};
+
+[__AttributeUsage(_AttributeTargets.Function)]
+public struct playground_CALL_INDIRECTAttribute
+{
+    string indirectBuffer;
+    uint offset;
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]

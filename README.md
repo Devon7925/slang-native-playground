@@ -51,6 +51,10 @@ Acts the same as `BLACK` but is automatically scaled based on screen size.
 * `playground_REBIND_FOR_DRAW` on a texture allows specifying a texture that will mirror another texture so it becomes accessible in a graphics context
 * `playground::SAMPLER` allows a sampler to be used
 
+### `playground::CALL_INDIRECT`
+
+Takes a buffer and a offset and makes an indirect dispatch using them. The buffer is not accessible from the shader being called.
+
 ## Examples
 
 There are examples of use of the extra features in the `examples` folder.

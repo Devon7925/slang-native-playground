@@ -10,7 +10,7 @@ use egui_wgpu::ScreenDescriptor;
 use rand::Rng;
 use regex::Regex;
 use slang_compiler::{
-    CallCommand, CompilationResult, DrawCommand, ResourceCommandData,
+    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
     UniformController, UniformControllerType,
 };
 use tokio::runtime;
@@ -75,7 +75,7 @@ impl GPUResource {
         match self {
             GPUResource::Texture(texture) => texture.destroy(),
             GPUResource::Buffer(buffer) => buffer.destroy(),
-            GPUResource::Sampler(_) => {},
+            GPUResource::Sampler(_) => {}
         }
     }
 }
@@ -88,6 +88,37 @@ fn safe_set<K: Into<String>>(map: &mut HashMap<String, GPUResource>, key: K, val
     map.insert(string_key, value);
 }
 
+#[derive(PartialEq)]
+enum ResourceMetadata {
+    Indirect,
+}
+
+fn get_resource_metadata(
+    _resource_commands: &HashMap<String, ResourceCommandData>,
+    call_commands: &[CallCommand],
+) -> HashMap<String, Vec<ResourceMetadata>> {
+    let mut result: HashMap<String, Vec<ResourceMetadata>> = HashMap::new();
+
+    for CallCommand {
+        function: _,
+        call_once: _,
+        parameters,
+    } in call_commands.iter()
+    {
+        match parameters {
+            CallCommandParameters::Indirect(buffer_name, _) => {
+                result
+                    .entry(buffer_name.clone())
+                    .or_insert(vec![])
+                    .push(ResourceMetadata::Indirect);
+            }
+            _ => {}
+        }
+    }
+
+    result
+}
+
 const PRINTF_BUFFER_ELEMENT_SIZE: usize = 12;
 const PRINTF_BUFFER_SIZE: usize = PRINTF_BUFFER_ELEMENT_SIZE * 2048; // 12 bytes per printf struct
 async fn process_resource_commands(
@@ -95,6 +126,7 @@ async fn process_resource_commands(
     device: &wgpu::Device,
     resource_bindings: &HashMap<String, wgpu::BindGroupLayoutEntry>,
     resource_commands: &HashMap<String, ResourceCommandData>,
+    resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
     random_pipeline: &mut ComputePipeline,
     uniform_size: u64,
 ) -> HashMap<String, GPUResource> {
@@ -114,7 +146,8 @@ async fn process_resource_commands(
 
     let mut unprocessed_resource_commands = resource_commands.clone();
     while !unprocessed_resource_commands.is_empty() {
-        let resource_commands: HashMap<String, ResourceCommandData> = unprocessed_resource_commands.drain().collect();
+        let resource_commands: HashMap<String, ResourceCommandData> =
+            unprocessed_resource_commands.drain().collect();
 
         for (resource_name, command_data) in resource_commands {
             match command_data {
@@ -130,11 +163,21 @@ async fn process_resource_commands(
                         panic!("Resource ${resource_name} is an invalid type for ZEROS");
                     }
 
+                    let mut usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
+
+                    if resource_metadata
+                        .get(&resource_name)
+                        .unwrap_or(&vec![])
+                        .contains(&ResourceMetadata::Indirect)
+                    {
+                        usage |= wgpu::BufferUsages::INDIRECT;
+                    }
+
                     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                        label: None,
+                        label: Some(&resource_name),
                         mapped_at_creation: false,
                         size: (count * element_size) as u64,
-                        usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_DST),
+                        usage,
                     });
 
                     // Initialize the buffer with zeros.
@@ -218,9 +261,10 @@ async fn process_resource_commands(
                     queue.write_buffer(seed_buffer, 0, bytemuck::cast_slice(seed_value));
 
                     // Encode commands to do the computation
-                    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("compute builtin encoder"),
-                    });
+                    let mut encoder =
+                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("compute builtin encoder"),
+                        });
                     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("compute builtin pass"),
                         timestamp_writes: None,
@@ -267,7 +311,8 @@ async fn process_resource_commands(
 
                     if !matches!(
                         binding_info.ty,
-                        wgpu::BindingType::StorageTexture { .. } | wgpu::BindingType::Texture { .. }
+                        wgpu::BindingType::StorageTexture { .. }
+                            | wgpu::BindingType::Texture { .. }
                     ) {
                         panic!("Resource {} is an invalid type for BLACK", resource_name);
                     }
@@ -330,7 +375,8 @@ async fn process_resource_commands(
 
                     if !matches!(
                         binding_info.ty,
-                        wgpu::BindingType::StorageTexture { .. } | wgpu::BindingType::Texture { .. }
+                        wgpu::BindingType::StorageTexture { .. }
+                            | wgpu::BindingType::Texture { .. }
                     ) {
                         panic!("Resource {} is an invalid type for BLACK", resource_name);
                     }
@@ -475,7 +521,9 @@ async fn process_resource_commands(
                         GPUResource::Texture(texture),
                     );
                 }
-                ref command @ ResourceCommandData::RebindForDraw { ref original_texture } => {
+                ref command @ ResourceCommandData::RebindForDraw {
+                    ref original_texture,
+                } => {
                     let Some(binding_info) = resource_bindings.get(&resource_name) else {
                         panic!("Resource {} is not defined in the bindings.", resource_name);
                     };
@@ -483,11 +531,13 @@ async fn process_resource_commands(
                     if !matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
                         panic!("Resource ${resource_name} is not a texture.");
                     }
-                    let Some(GPUResource::Texture(tex)) = allocated_resources.get(original_texture) else {
-                        unprocessed_resource_commands.insert(resource_name.to_string(), command.clone());
+                    let Some(GPUResource::Texture(tex)) = allocated_resources.get(original_texture)
+                    else {
+                        unprocessed_resource_commands
+                            .insert(resource_name.to_string(), command.clone());
                         continue;
                     };
-                    
+
                     let texture = device.create_texture(&wgpu::TextureDescriptor {
                         label: None,
                         dimension: wgpu::TextureDimension::D2,
@@ -502,7 +552,11 @@ async fn process_resource_commands(
                         usage: tex.usage(),
                         view_formats: &[],
                     });
-                    safe_set(&mut allocated_resources, resource_name, GPUResource::Texture(texture));
+                    safe_set(
+                        &mut allocated_resources,
+                        resource_name,
+                        GPUResource::Texture(texture),
+                    );
                 }
                 ResourceCommandData::SLIDER {
                     default,
@@ -905,11 +959,15 @@ impl State {
         // Create the pipeline (without resource bindings for now)
         random_pipeline.create_pipeline(&module, None, None);
 
+        let resource_metadata =
+            get_resource_metadata(&compilation.resource_commands, &compilation.call_commands);
+
         let allocated_resources = process_resource_commands(
             &queue,
             &device,
             &compilation.bindings,
             &compilation.resource_commands,
+            &resource_metadata,
             &mut random_pipeline,
             compilation.uniform_size,
         )
@@ -923,7 +981,20 @@ impl State {
         });
         for (shader_name, thread_group_size) in compilation.entry_group_sizes {
             let mut pipeline = ComputePipeline::new(device.clone());
-            pipeline.create_pipeline_layout(compilation.bindings.clone());
+
+            // Filter out indirect buffer bindings if this pipeline uses them for dispatch
+            let mut pipeline_bindings = compilation.bindings.clone();
+            for call_command in &compilation.call_commands {
+                if call_command.function == shader_name {
+                    if let CallCommandParameters::Indirect(buffer_name, _) =
+                        &call_command.parameters
+                    {
+                        pipeline_bindings.remove(buffer_name);
+                    }
+                }
+            }
+
+            pipeline.create_pipeline_layout(pipeline_bindings);
             pipeline.create_pipeline(&module, Some(&allocated_resources), Some(&shader_name));
             pipeline.set_thread_group_size(thread_group_size);
             compute_pipelines.insert(shader_name, pipeline);
@@ -1182,19 +1253,32 @@ impl State {
             pass.set_bind_group(0, pipeline.bind_group.as_ref(), &[]);
             pass.set_pipeline(pipeline.pipeline.as_ref().unwrap());
 
-            let size: [u32; 3] = match &call_command.parameters {
+            match &call_command.parameters {
                 slang_compiler::CallCommandParameters::ResourceBased(
                     resource_name,
                     element_size,
                 ) => {
                     let resource = self.allocated_resources.get(resource_name).unwrap();
-                    match resource {
+                    let size = match resource {
                         GPUResource::Texture(texture) => [texture.width(), texture.height(), 1],
                         GPUResource::Buffer(buffer) => {
                             [buffer.size() as u32 / element_size.unwrap_or(4), 1, 1]
-                        },
+                        }
                         GPUResource::Sampler(_) => panic!("Sampler doesn't have size"),
-                    }
+                    };
+                    let block_size = pipeline.thread_group_size.unwrap();
+
+                    let work_group_size: Vec<u32> = size
+                        .iter()
+                        .zip(block_size.map(|s| s as u32))
+                        .map(|(size, block_size)| (size + block_size - 1) / block_size)
+                        .collect();
+
+                    pass.dispatch_workgroups(
+                        work_group_size[0],
+                        work_group_size[1],
+                        work_group_size[2],
+                    );
                 }
                 slang_compiler::CallCommandParameters::FixedSize(items) => {
                     if items.len() > 3 {
@@ -1204,20 +1288,29 @@ impl State {
                     for (i, n) in items.iter().enumerate() {
                         size[i] = *n;
                     }
-                    size
+                    let block_size = pipeline.thread_group_size.unwrap();
+
+                    let work_group_size: Vec<u32> = size
+                        .iter()
+                        .zip(block_size.map(|s| s as u32))
+                        .map(|(size, block_size)| (size + block_size - 1) / block_size)
+                        .collect();
+
+                    pass.dispatch_workgroups(
+                        work_group_size[0],
+                        work_group_size[1],
+                        work_group_size[2],
+                    );
+                }
+                slang_compiler::CallCommandParameters::Indirect(indirect_buffer, offset) => {
+                    let Some(GPUResource::Buffer(resource)) =
+                        self.allocated_resources.get(indirect_buffer)
+                    else {
+                        panic!("Could not get indirect buffer");
+                    };
+                    pass.dispatch_workgroups_indirect(resource, *offset as u64);
                 }
             };
-
-            //TODO
-            let block_size = pipeline.thread_group_size.unwrap();
-
-            let work_group_size: Vec<u32> = size
-                .iter()
-                .zip(block_size.map(|s| s as u32))
-                .map(|(size, block_size)| (size + block_size - 1) / block_size)
-                .collect();
-
-            pass.dispatch_workgroups(work_group_size[0], work_group_size[1], work_group_size[2]);
             drop(pass);
         }
 
@@ -1242,17 +1335,21 @@ impl State {
             );
         }
 
-        let mut pass = DrawPipeline::begin_render_pass(&self.device, Extent3d {
-            width: surface_texture.texture.width(),
-            height: surface_texture.texture.height(),
-            depth_or_array_layers: 1,
-        }, &mut encoder, &texture_view);
+        let mut pass = DrawPipeline::begin_render_pass(
+            &self.device,
+            Extent3d {
+                width: surface_texture.texture.width(),
+                height: surface_texture.texture.height(),
+                depth_or_array_layers: 1,
+            },
+            &mut encoder,
+            &texture_view,
+        );
         for (draw_command, pipeline) in self
             .draw_commands
             .iter()
             .zip(self.draw_pipelines.iter_mut())
         {
-
             pass.set_bind_group(0, pipeline.bind_group.as_ref(), &[]);
             pass.set_pipeline(pipeline.pipeline.as_ref().unwrap());
 

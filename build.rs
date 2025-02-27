@@ -4,7 +4,9 @@ use std::{
 };
 
 use slang::{
-    reflection::{Shader, VariableLayout}, Downcast, GlobalSession, ParameterCategory, ResourceAccess, ResourceShape, ScalarType, Stage, TypeKind
+    reflection::{Shader, VariableLayout},
+    Downcast, GlobalSession, ParameterCategory, ResourceAccess, ResourceShape, ScalarType, Stage,
+    TypeKind,
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -41,7 +43,12 @@ impl SlangCompiler {
         }
     }
 
-    fn add_components(&self, user_module: slang::Module, slang_session: &slang::Session, component_list: &mut Vec<slang::ComponentType>) {
+    fn add_components(
+        &self,
+        user_module: slang::Module,
+        slang_session: &slang::Session,
+        component_list: &mut Vec<slang::ComponentType>,
+    ) {
         let count = user_module.entry_point_count();
         for i in 0..count {
             let entry_point = user_module.entry_point_by_index(i).unwrap();
@@ -59,10 +66,12 @@ impl SlangCompiler {
                 .find_function_by_name(st.as_str())
                 .is_some()
             {
-                let module = slang_session.load_module(format!("{}.slang", st).as_str()).unwrap();
+                let module = slang_session
+                    .load_module(format!("{}.slang", st).as_str())
+                    .unwrap();
 
                 component_list.push(module.downcast().clone());
-        
+
                 let count = module.entry_point_count();
                 for i in 0..count {
                     let entry_point = module.entry_point_by_index(i).unwrap();
@@ -93,7 +102,9 @@ impl SlangCompiler {
                 view_dimension: wgpu::TextureViewDimension::D2,
             }),
             slang::BindingType::MutableTeture => {
-                let format = global_layout.element_type_layout().binding_range_image_format(index as i64 - 1);
+                let format = global_layout
+                    .element_type_layout()
+                    .binding_range_image_format(index as i64 - 1);
                 Some(wgpu::BindingType::StorageTexture {
                     access: match parameter.ty().resource_access() {
                         slang::ResourceAccess::Read => wgpu::StorageTextureAccess::ReadOnly,
@@ -107,7 +118,7 @@ impl SlangCompiler {
                     ),
                     view_dimension: wgpu::TextureViewDimension::D2,
                 })
-            },
+            }
             slang::BindingType::ConstantBuffer => Some(wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
@@ -120,15 +131,13 @@ impl SlangCompiler {
                     min_binding_size: None,
                 })
             }
-            slang::BindingType::Sampler => {
-                Some(
-                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering)
-                )
-            }
+            slang::BindingType::Sampler => Some(wgpu::BindingType::Sampler(
+                wgpu::SamplerBindingType::NonFiltering,
+            )),
             a => {
                 println!("cargo::warning=Could not generate binding for {:?}", a);
                 None
-            },
+            }
         }
     }
 
@@ -151,7 +160,11 @@ impl SlangCompiler {
             let resource_info =
                 self.get_binding_descriptor(parameter.binding_index(), reflection, parameter);
             let mut visibility = wgpu::ShaderStages::NONE;
-            if resource_commands.get(&name).map(|c| is_available_in_compute(c)).unwrap_or(true) {
+            if resource_commands
+                .get(&name)
+                .map(|c| is_available_in_compute(c))
+                .unwrap_or(true)
+            {
                 visibility |= wgpu::ShaderStages::COMPUTE;
             }
             if is_available_in_graphics(parameter) {
@@ -206,7 +219,9 @@ impl SlangCompiler {
         for (parameter_idx, parameter) in shader_reflection
             .global_params_type_layout()
             .element_type_layout()
-            .fields().enumerate() {
+            .fields()
+            .enumerate()
+        {
             let offset = shader_reflection
                 .global_params_type_layout()
                 .element_type_layout()
@@ -237,8 +252,7 @@ impl SlangCompiler {
                         element_size: get_size(parameter.ty().resource_result_type()),
                     })
                 } else if playground_attribute_name == "SAMPLER" {
-                    if parameter.ty().kind() != TypeKind::SamplerState
-                    {
+                    if parameter.ty().kind() != TypeKind::SamplerState {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports samplers",
                             parameter.variable().name().unwrap()
@@ -360,7 +374,11 @@ impl SlangCompiler {
                         .binding_range_image_format(offset);
 
                     Some(ResourceCommandData::URL {
-                        url: attribute.argument_value_string(0).unwrap().trim_matches('"').to_string(),
+                        url: attribute
+                            .argument_value_string(0)
+                            .unwrap()
+                            .trim_matches('"')
+                            .to_string(),
                         format: get_wgpu_format_from_slang_format(
                             format,
                             parameter.ty().resource_result_type(),
@@ -377,7 +395,11 @@ impl SlangCompiler {
                     }
 
                     Some(ResourceCommandData::RebindForDraw {
-                        original_texture: attribute.argument_value_string(0).unwrap().trim_matches('"').to_string(),
+                        original_texture: attribute
+                            .argument_value_string(0)
+                            .unwrap()
+                            .trim_matches('"')
+                            .to_string(),
                     })
                 } else if playground_attribute_name == "SLIDER" {
                     if parameter.ty().kind() != TypeKind::Scalar
@@ -463,11 +485,7 @@ impl SlangCompiler {
         return commands;
     }
 
-    pub fn compile(
-        &self,
-        search_path: &str,
-        entry_module_name: &str,
-    ) -> CompilationResult {
+    pub fn compile(&self, search_path: &str, entry_module_name: &str) -> CompilationResult {
         let search_path = std::ffi::CString::new(search_path).unwrap();
 
         // All compiler options are available through this builder.
@@ -557,18 +575,20 @@ impl SlangCompiler {
 fn is_available_in_compute(resource_command: &ResourceCommandData) -> bool {
     match resource_command {
         ResourceCommandData::RebindForDraw { .. } => false,
-        _ => true
+        _ => true,
     }
 }
 fn is_available_in_graphics(parameter: &VariableLayout) -> bool {
     if parameter.ty().kind() == TypeKind::Resource {
-        if parameter.ty().resource_shape() == ResourceShape::SlangTexture2d && parameter.ty().resource_access() != ResourceAccess::Write {
-            return true
+        if parameter.ty().resource_shape() == ResourceShape::SlangTexture2d
+            && parameter.ty().resource_access() == ResourceAccess::Read
+        {
+            return true;
         }
     } else if parameter.ty().kind() == TypeKind::SamplerState {
-        return true
+        return true;
     } else if parameter.ty().kind() == TypeKind::ConstantBuffer {
-        return true
+        return true;
     }
     false
 }
@@ -585,7 +605,10 @@ fn get_wgpu_format_from_slang_format(
     use wgpu::TextureFormat;
     match format {
         ImageFormat::SLANGIMAGEFORMATUnknown => match resource_type.kind() {
-            TypeKind::Vector => match (resource_type.element_type().scalar_type(), resource_type.element_count()) {
+            TypeKind::Vector => match (
+                resource_type.element_type().scalar_type(),
+                resource_type.element_count(),
+            ) {
                 (ScalarType::Float32, 2) => TextureFormat::Rg32Float,
                 (ScalarType::Float32, 3) => TextureFormat::Rgba32Float,
                 (ScalarType::Float32, 4) => TextureFormat::Rgba32Float,
@@ -673,7 +696,10 @@ fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
                     panic!("Cannot have multiple CALL attributes for the same function");
                 }
 
-                let resource_name = attribute.argument_value_string(0).unwrap().trim_matches('"');
+                let resource_name = attribute
+                    .argument_value_string(0)
+                    .unwrap()
+                    .trim_matches('"');
                 let resource_reflection = reflection
                     .parameters()
                     .find(|param| param.variable().name().unwrap() == resource_name)
@@ -681,7 +707,8 @@ fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
 
                 let mut element_size: Option<u32> = None;
                 if resource_reflection.ty().kind() == TypeKind::Resource
-                    && resource_reflection.ty().resource_shape() == ResourceShape::SlangStructuredBuffer
+                    && resource_reflection.ty().resource_shape()
+                        == ResourceShape::SlangStructuredBuffer
                 {
                     element_size = Some(get_size(resource_reflection.ty().resource_result_type()));
                 }
@@ -705,9 +732,36 @@ fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
                 call_command = Some(CallCommand {
                     function: fn_name.to_string(),
                     call_once: false,
-                    parameters: CallCommandParameters::FixedSize(
-                        args
-                    ),
+                    parameters: CallCommandParameters::FixedSize(args),
+                });
+            } else if playground_attribute_name == "CALL_INDIRECT" {
+                if call_command.is_some() {
+                    panic!("Cannot have multiple CALL attributes for the same function");
+                }
+
+                let resource_name = attribute
+                    .argument_value_string(0)
+                    .unwrap()
+                    .trim_matches('"')
+                    .to_string();
+                let resource_reflection = reflection
+                    .parameters()
+                    .find(|param| param.variable().name().unwrap() == resource_name)
+                    .unwrap();
+
+                if resource_reflection.ty().kind() != TypeKind::Resource
+                    && resource_reflection.ty().resource_shape()
+                        != ResourceShape::SlangStructuredBuffer
+                {
+                    panic!("Invalid type for CALL_INDIRECT buffer");
+                }
+
+                let offset = attribute.argument_value_int(1).unwrap() as u32;
+
+                call_command = Some(CallCommand {
+                    function: fn_name.to_string(),
+                    call_once: false,
+                    parameters: CallCommandParameters::Indirect(resource_name, offset),
                 });
             } else if playground_attribute_name == "CALL_ONCE" {
                 if call_once {
@@ -737,7 +791,10 @@ fn parse_draw_commands(reflection: &Shader) -> Vec<DrawCommand> {
             };
             if playground_attribute_name == "DRAW" {
                 let vertex_count = attribute.argument_value_int(0).unwrap();
-                let fragment_entrypoint = attribute.argument_value_string(1).unwrap().trim_matches('"');
+                let fragment_entrypoint = attribute
+                    .argument_value_string(1)
+                    .unwrap()
+                    .trim_matches('"');
 
                 draw_commands.push(DrawCommand {
                     vertex_count: vertex_count as u32,
@@ -767,7 +824,9 @@ fn get_uniform_size(shader_reflection: &Shader) -> u64 {
     return round_up_to_nearest(size, 16);
 }
 
-fn get_uniform_sliders(resource_commands: &HashMap<String, ResourceCommandData>) -> Vec<UniformController> {
+fn get_uniform_sliders(
+    resource_commands: &HashMap<String, ResourceCommandData>,
+) -> Vec<UniformController> {
     let mut controllers: Vec<UniformController> = vec![];
     for (resource_name, command_data) in resource_commands.iter() {
         match command_data {
@@ -826,8 +885,7 @@ fn main() {
     let mut file = File::create("compiled_shaders/compiled.ron").unwrap();
     file.write_all(serialized.as_bytes()).unwrap();
 
-    let rand_float_compilation =
-        compiler.compile("demos", "rand_float.slang");
+    let rand_float_compilation = compiler.compile("demos", "rand_float.slang");
     let serialized =
         ron::ser::to_string_pretty(&rand_float_compilation, ron::ser::PrettyConfig::default())
             .unwrap();

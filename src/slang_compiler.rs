@@ -92,6 +92,7 @@ pub struct CompilationResult {
 pub enum CallCommandParameters {
     ResourceBased(String, Option<u32>),
     FixedSize(Vec<u32>),
+    Indirect(String, u32),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
