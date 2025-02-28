@@ -1,7 +1,7 @@
 [package]
 name = "slang-native-playground"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 env_logger = "0.11.6"
@@ -31,4 +31,4 @@ serde = { version = "1.0.217", features = ["derive"] }
 ron = "0.8.1"
 
 [patch.crates-io]
-wgpu = { git = "https://github.com/Devon7925/wgpu.git" }
+wgpu = { git = "https://github.com/gfx-rs/wgpu.git" }
