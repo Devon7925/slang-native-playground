@@ -1,8 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
-use wgpu::{ColorWrites, DepthStencilState, Device, FragmentState, RenderPassDepthStencilAttachment, VertexState};
+use wgpu::{
+    ColorWrites, DepthStencilState, Device, FragmentState, RenderPassDepthStencilAttachment,
+    VertexState,
+};
 
-use crate::{slang_compiler::ResourceCommandData, GPUResource};
+use crate::{GPUResource, slang_compiler::ResourceCommandData};
 
 pub struct DrawPipeline {
     pub device: Arc<wgpu::Device>,
@@ -91,7 +94,7 @@ impl DrawPipeline {
                     format: Self::DEPTH_FORMAT,
                     depth_write_enabled: true,
                     depth_compare: wgpu::CompareFunction::Less, // 1.
-                    stencil: wgpu::StencilState::default(), // 2.
+                    stencil: wgpu::StencilState::default(),     // 2.
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: Default::default(),
@@ -114,66 +117,73 @@ impl DrawPipeline {
         let mut entries: Vec<wgpu::BindGroupEntry> = vec![];
         let mut texture_views: HashMap<&String, wgpu::TextureView> = HashMap::new();
         let mut rebound_textures = HashMap::new();
+        let mut buffer_bindings: HashMap<&String, wgpu::BufferBinding> = HashMap::new();
+        let mut rebound_buffers = HashMap::new();
         for (name, resource) in allocated_resources.iter() {
             match resource {
-                GPUResource::Buffer(_) | GPUResource::Sampler(_) => {}
-                GPUResource::Texture(texture) => {
-                    if let Some(ResourceCommandData::RebindForDraw { original_texture }) =
+                GPUResource::Buffer(buffer) => {
+                    if let Some(ResourceCommandData::RebindForDraw { original_resource }) =
                         resource_commands.get(name)
                     {
-                        rebound_textures.insert(original_texture, name);
+                        rebound_buffers.insert(original_resource, name);
+                    }
+                    let buffer_binding = buffer.as_entire_buffer_binding();
+                    buffer_bindings.insert(name, buffer_binding);
+                }
+                GPUResource::Texture(texture) => {
+                    if let Some(ResourceCommandData::RebindForDraw { original_resource }) =
+                        resource_commands.get(name)
+                    {
+                        rebound_textures.insert(original_resource, name);
                     }
                     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                     texture_views.insert(name, texture_view);
                 }
+                GPUResource::Sampler(_) => {}
             }
         }
         for (name, resource) in allocated_resources.iter() {
             let Some(bind_info) = self.resource_bindings.as_ref().unwrap().get(name) else {
                 continue;
             };
-            match resource {
-                GPUResource::Buffer(buffer) => {
-                    entries.push(wgpu::BindGroupEntry {
-                        binding: bind_info.binding,
-                        resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
-                    });
-                }
-                GPUResource::Texture(_) => {
-                    if let Some(ResourceCommandData::RebindForDraw { original_texture }) =
-                        resource_commands.get(name)
-                    {
-                        entries.push(wgpu::BindGroupEntry {
-                            binding: bind_info.binding,
-                            resource: wgpu::BindingResource::TextureView(
-                                texture_views.get(original_texture).unwrap(),
-                            ),
-                        });
-                        continue;
-                    }
-                    if let Some(replacement) = rebound_textures.get(&name) {
-                        entries.push(wgpu::BindGroupEntry {
-                            binding: bind_info.binding,
-                            resource: wgpu::BindingResource::TextureView(
-                                texture_views.get(replacement).unwrap(),
-                            ),
-                        });
-                        continue;
-                    }
-                    entries.push(wgpu::BindGroupEntry {
-                        binding: bind_info.binding,
-                        resource: wgpu::BindingResource::TextureView(
-                            texture_views.get(name).unwrap(),
-                        ),
-                    });
-                }
-                GPUResource::Sampler(sampler) => {
-                    entries.push(wgpu::BindGroupEntry {
-                        binding: bind_info.binding,
-                        resource: wgpu::BindingResource::Sampler(sampler),
-                    });
-                }
-            }
+            let binding_resource = match resource {
+                GPUResource::Buffer(_) => wgpu::BindingResource::Buffer(
+                    buffer_bindings
+                        .get(
+                            if let Some(ResourceCommandData::RebindForDraw { original_resource }) =
+                                resource_commands.get(name)
+                            {
+                                original_resource
+                            } else if let Some(replacement) = rebound_buffers.get(&name) {
+                                replacement
+                            } else {
+                                name
+                            },
+                        )
+                        .unwrap()
+                        .clone(),
+                ),
+                GPUResource::Texture(_) => wgpu::BindingResource::TextureView(
+                    texture_views
+                        .get(
+                            if let Some(ResourceCommandData::RebindForDraw { original_resource }) =
+                                resource_commands.get(name)
+                            {
+                                original_resource
+                            } else if let Some(replacement) = rebound_textures.get(&name) {
+                                replacement
+                            } else {
+                                name
+                            },
+                        )
+                        .unwrap(),
+                ),
+                GPUResource::Sampler(sampler) => wgpu::BindingResource::Sampler(sampler),
+            };
+            entries.push(wgpu::BindGroupEntry {
+                binding: bind_info.binding,
+                resource: binding_resource,
+            });
         }
 
         // Check that all resources are bound

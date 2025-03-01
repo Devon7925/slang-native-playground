@@ -24,9 +24,12 @@ pub enum ResourceCommandData {
         url: String,
         format: wgpu::TextureFormat,
     },
+    Model {
+        data: Vec<u8>,
+    },
     Sampler,
     RebindForDraw {
-        original_texture: String,
+        original_resource: String,
     },
     SLIDER {
         default: f32,

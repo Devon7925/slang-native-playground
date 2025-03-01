@@ -48,7 +48,7 @@ Acts the same as `BLACK` but is automatically scaled based on screen size.
 ### Draw features
 
 * `playground::DRAW` on a vertex shader allows creating a fixed size draw that will run every frame
-* `playground::REBIND_FOR_DRAW` on a texture allows specifying a texture that will mirror another texture so it becomes accessible in a graphics context
+* `playground::REBIND_FOR_DRAW` on a texture or buffer allows specifying a resource that will mirror another resource so it becomes accessible in a graphics context. Generally neccesary to make writable resources available.
 * `playground::SAMPLER` allows a sampler to be used
 
 ### `playground::CALL_INDIRECT`
@@ -65,6 +65,23 @@ Example:
 uniform float spacePressed;
 [playground::KEY_INPUT("W")] 
 uniform float wPressed;
+```
+
+### `playground::MODEL`
+
+Allows loading *.obj files into a buffer. Element type must be a struct with only `position`, `normal`, and `uv` fields.
+
+Example:
+
+```slang
+[playground::MODEL("static/teapot.obj")]
+StructuredBuffer<Vertex> verticies;
+
+struct Vertex
+{
+    float3 position;
+    float3 normal;
+}
 ```
 
 ## Examples

@@ -15,7 +15,7 @@ use slang_compiler::{
 };
 use tokio::runtime;
 use url::{ParseError, Url};
-use wgpu::{Extent3d, Features, SurfaceError};
+use wgpu::{BufferDescriptor, Extent3d, Features, SurfaceError};
 
 use std::{
     borrow::Cow,
@@ -201,6 +201,35 @@ async fn process_resource_commands(
                     // Initialize the buffer with zeros.
                     let zeros = vec![0u8; (count * element_size) as usize];
                     queue.write_buffer(&buffer, 0, &zeros);
+
+                    safe_set(
+                        &mut allocated_resources,
+                        resource_name,
+                        GPUResource::Buffer(buffer),
+                    );
+                }
+                ResourceCommandData::Model {
+                    data,
+                } => {
+                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                        panic!("Resource ${resource_name} is not defined in the bindings.");
+                    };
+
+                    if !matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
+                        panic!("Resource ${resource_name} is an invalid type for MODEL");
+                    }
+
+                    let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
+
+                    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&resource_name),
+                        mapped_at_creation: false,
+                        size: data.len() as u64,
+                        usage,
+                    });
+
+                    // Initialize the buffer with zeros.
+                    queue.write_buffer(&buffer, 0, &data);
 
                     safe_set(
                         &mut allocated_resources,
@@ -540,41 +569,61 @@ async fn process_resource_commands(
                     );
                 }
                 ref command @ ResourceCommandData::RebindForDraw {
-                    ref original_texture,
+                    ref original_resource,
                 } => {
                     let Some(binding_info) = resource_bindings.get(&resource_name) else {
                         panic!("Resource {} is not defined in the bindings.", resource_name);
                     };
 
-                    if !matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
-                        panic!("Resource ${resource_name} is not a texture.");
+                    if matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
+                        let Some(GPUResource::Texture(tex)) = allocated_resources.get(original_resource)
+                        else {
+                            unprocessed_resource_commands
+                                .insert(resource_name.to_string(), command.clone());
+                            continue;
+                        };
+    
+                        let texture = device.create_texture(&wgpu::TextureDescriptor {
+                            label: None,
+                            dimension: wgpu::TextureDimension::D2,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            size: wgpu::Extent3d {
+                                width: tex.width(),
+                                height: tex.height(),
+                                depth_or_array_layers: 1,
+                            },
+                            format: tex.format(),
+                            usage: tex.usage(),
+                            view_formats: &[],
+                        });
+                        safe_set(
+                            &mut allocated_resources,
+                            resource_name,
+                            GPUResource::Texture(texture),
+                        );
+                    } else if matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
+                        let Some(GPUResource::Buffer(buf)) = allocated_resources.get(original_resource)
+                        else {
+                            unprocessed_resource_commands
+                                .insert(resource_name.to_string(), command.clone());
+                            continue;
+                        };
+    
+                        let buffer = device.create_buffer(&BufferDescriptor {
+                            label: None,
+                            size: buf.size(),
+                            usage: buf.usage(),
+                            mapped_at_creation: false,
+                        });
+                        safe_set(
+                            &mut allocated_resources,
+                            resource_name,
+                            GPUResource::Buffer(buffer),
+                        );
+                    } else {
+                        panic!("Resource {} is an invalid type for REBIND_FOR_DRAW", resource_name)
                     }
-                    let Some(GPUResource::Texture(tex)) = allocated_resources.get(original_texture)
-                    else {
-                        unprocessed_resource_commands
-                            .insert(resource_name.to_string(), command.clone());
-                        continue;
-                    };
-
-                    let texture = device.create_texture(&wgpu::TextureDescriptor {
-                        label: None,
-                        dimension: wgpu::TextureDimension::D2,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        size: wgpu::Extent3d {
-                            width: tex.width(),
-                            height: tex.height(),
-                            depth_or_array_layers: 1,
-                        },
-                        format: tex.format(),
-                        usage: tex.usage(),
-                        view_formats: &[],
-                    });
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        GPUResource::Texture(texture),
-                    );
                 }
                 ResourceCommandData::SLIDER {
                     default,
@@ -1265,6 +1314,8 @@ impl State {
                     let keycode = match key.to_lowercase().as_str() {
                         "enter" => Key::Named(NamedKey::Enter),
                         "space" => Key::Named(NamedKey::Space),
+                        "shift" => Key::Named(NamedKey::Shift),
+                        "ctrl" => Key::Named(NamedKey::Control),
                         "escape" => Key::Named(NamedKey::Escape),
                         "backspace" => Key::Named(NamedKey::Backspace),
                         "tab" => Key::Named(NamedKey::Tab),

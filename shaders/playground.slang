@@ -237,3 +237,9 @@ public struct playground_DRAWAttribute
     uint vertexCount;
     string fragmentEntrypoint;
 };
+
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_MODELAttribute
+{
+    string path;
+};

@@ -29,6 +29,8 @@ strum_macros = "0.27"
 wgpu = { version = "24.0.0", features = ["serde"] }
 serde = { version = "1.0.217", features = ["derive"] }
 ron = "0.8.1"
+tobj = "4.0.3"
+bytemuck = "1.21.0"
 
 [patch.crates-io]
 wgpu = { git = "https://github.com/gfx-rs/wgpu.git" }

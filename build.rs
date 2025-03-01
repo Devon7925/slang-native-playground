@@ -4,9 +4,9 @@ use std::{
 };
 
 use slang::{
-    reflection::{Shader, VariableLayout},
     Downcast, GlobalSession, ParameterCategory, ResourceAccess, ResourceShape, ScalarType, Stage,
     TypeKind,
+    reflection::{Shader, VariableLayout},
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -131,6 +131,11 @@ impl SlangCompiler {
                     min_binding_size: None,
                 })
             }
+            slang::BindingType::RawBuffer => Some(wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            }),
             slang::BindingType::Sampler => Some(wgpu::BindingType::Sampler(
                 wgpu::SamplerBindingType::NonFiltering,
             )),
@@ -272,7 +277,10 @@ impl SlangCompiler {
                         || parameter.ty().resource_result_type().scalar_type()
                             != ScalarType::Float32
                     {
-                        panic!("{playground_attribute_name} attribute cannot be applied to {}, it only supports float buffers", parameter.variable().name().unwrap())
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float buffers",
+                            parameter.variable().name().unwrap()
+                        )
                     }
                     let count = attribute.argument_value_int(0).unwrap();
                     if count < 0 {
@@ -384,18 +392,161 @@ impl SlangCompiler {
                             parameter.ty().resource_result_type(),
                         ),
                     })
-                } else if playground_attribute_name == "REBIND_FOR_DRAW" {
+                } else if playground_attribute_name == "MODEL" {
                     if parameter.ty().kind() != TypeKind::Resource
-                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
+                        || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
                     {
                         panic!(
-                            "REBIND_FOR_DRAW attribute cannot be applied to {}, it only supports 2D textures",
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+                    if parameter.ty().element_type().kind() != TypeKind::Struct {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, inner type must be struct",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+                    let mut field_types = vec![];
+                    for field in parameter.ty().element_type().fields() {
+                        match field.name().unwrap() {
+                            "position" => {
+                                if field.ty().kind() != TypeKind::Vector
+                                    || field.ty().element_count() != 3
+                                    || field.ty().element_type().kind() != TypeKind::Scalar
+                                    || field.ty().element_type().scalar_type()
+                                        != ScalarType::Float32
+                                {
+                                    panic!(
+                                        "Unsupported type for position field of MODEL struct for {}",
+                                        parameter.variable().name().unwrap()
+                                    )
+                                }
+                                field_types.push(ModelField::Position)
+                            }
+                            "normal" => {
+                                if field.ty().kind() != TypeKind::Vector
+                                    || field.ty().element_count() != 3
+                                    || field.ty().element_type().kind() != TypeKind::Scalar
+                                    || field.ty().element_type().scalar_type()
+                                        != ScalarType::Float32
+                                {
+                                    panic!(
+                                        "Unsupported type for normal field of MODEL struct for {}",
+                                        parameter.variable().name().unwrap()
+                                    )
+                                }
+                                field_types.push(ModelField::Normal)
+                            }
+                            "uv" => {
+                                if field.ty().kind() != TypeKind::Vector
+                                    || field.ty().element_count() != 3
+                                    || field.ty().element_type().kind() != TypeKind::Scalar
+                                    || field.ty().element_type().scalar_type()
+                                        != ScalarType::Float32
+                                {
+                                    panic!(
+                                        "Unsupported type for normal field of MODEL struct for {}",
+                                        parameter.variable().name().unwrap()
+                                    )
+                                }
+                                field_types.push(ModelField::TexCoords)
+                            }
+                            field_name => panic!(
+                                "{field_name} is not a valid field for MODEL attribute on {}, valid fields are: position, normal, uv",
+                                parameter.variable().name().unwrap()
+                            ),
+                        }
+                    }
+
+                    let path = attribute
+                        .argument_value_string(0)
+                        .unwrap()
+                        .trim_matches('"')
+                        .to_string();
+
+                    // load obj file from path
+                    let (models, _) = tobj::load_obj(
+                        &path,
+                        &tobj::LoadOptions {
+                            triangulate: true,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let mut data: Vec<u8> = Vec::new();
+                    for model in models {
+                        let mesh = &model.mesh;
+                        println!(
+                            "cargo::warning=Loading mesh with {} verticies",
+                            mesh.indices.len()
+                        );
+                        for i in 0..mesh.indices.len() {
+                            for field_type in field_types.iter() {
+                                match field_type {
+                                    ModelField::Position => {
+                                        data.extend_from_slice(
+                                            &mesh.positions[3 * mesh.indices[i] as usize]
+                                                .to_le_bytes(),
+                                        );
+                                        data.extend_from_slice(
+                                            &mesh.positions[3 * mesh.indices[i] as usize + 1]
+                                                .to_le_bytes(),
+                                        );
+                                        data.extend_from_slice(
+                                            &mesh.positions[3 * mesh.indices[i] as usize + 2]
+                                                .to_le_bytes(),
+                                        );
+                                        data.extend_from_slice(&1.0f32.to_le_bytes());
+                                    }
+                                    ModelField::Normal => {
+                                        data.extend_from_slice(
+                                            &mesh.normals[3 * mesh.normal_indices[i] as usize]
+                                                .to_le_bytes(),
+                                        );
+                                        data.extend_from_slice(
+                                            &mesh.normals[3 * mesh.normal_indices[i] as usize + 1]
+                                                .to_le_bytes(),
+                                        );
+                                        data.extend_from_slice(
+                                            &mesh.normals[3 * mesh.normal_indices[i] as usize + 2]
+                                                .to_le_bytes(),
+                                        );
+                                        data.extend_from_slice(&1.0f32.to_le_bytes());
+                                    }
+                                    ModelField::TexCoords => {
+                                        data.extend_from_slice(
+                                            &mesh.texcoords[2 * mesh.texcoord_indices[i] as usize]
+                                                .to_le_bytes(),
+                                        );
+                                        data.extend_from_slice(
+                                            &mesh.texcoords
+                                                [2 * mesh.texcoord_indices[i] as usize + 1]
+                                                .to_le_bytes(),
+                                        );
+                                        data.extend_from_slice(&1.0f32.to_le_bytes());
+                                        data.extend_from_slice(&1.0f32.to_le_bytes());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Some(ResourceCommandData::Model { data })
+                } else if playground_attribute_name == "REBIND_FOR_DRAW" {
+                    if parameter.ty().kind() != TypeKind::Resource
+                        || !(parameter.ty().resource_shape() == ResourceShape::SlangTexture2d
+                            || parameter.ty().resource_shape()
+                                == ResourceShape::SlangStructuredBuffer)
+                    {
+                        panic!(
+                            "REBIND_FOR_DRAW attribute cannot be applied to {}, it only supports 2D textures and structured buffers",
                             parameter.variable().name().unwrap()
                         )
                     }
 
                     Some(ResourceCommandData::RebindForDraw {
-                        original_texture: attribute
+                        original_resource: attribute
                             .argument_value_string(0)
                             .unwrap()
                             .trim_matches('"')
@@ -591,6 +742,12 @@ impl SlangCompiler {
     }
 }
 
+enum ModelField {
+    Position,
+    Normal,
+    TexCoords,
+}
+
 fn is_available_in_compute(resource_command: &ResourceCommandData) -> bool {
     match resource_command {
         ResourceCommandData::RebindForDraw { .. } => false,
@@ -603,7 +760,12 @@ fn is_available_in_graphics(parameter: &VariableLayout) -> bool {
             && parameter.ty().resource_access() == ResourceAccess::Read
         {
             return true;
+        } else if parameter.ty().resource_shape() == ResourceShape::SlangStructuredBuffer
+            && parameter.ty().resource_access() == ResourceAccess::Read
+        {
+            return true;
         }
+        return false;
     } else if parameter.ty().kind() == TypeKind::SamplerState {
         return true;
     } else if parameter.ty().kind() == TypeKind::ConstantBuffer {
