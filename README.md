@@ -90,13 +90,8 @@ There are examples of use of the extra features in the `examples` folder.
 | Name | Description |
 |------|--------|
 | `cube_raster.slang` | Cube rasterizer with basic lighting |
-
-## Dependency forks
-
-This project uses a fork of the following dependencies:
-| Name | Reason |
-|------|--------|
-| [slang-rs](https://github.com/FloatyMonkey/slang-rs) | Expose `ResourceAccess` |
+| `free_flight_camera.slang` | A rasterizer of the Utah Teacup with keyboard control for the camera |
+| `painting.slang` | A simple painting app demonstrating storage textures and indirect dispatch |
 
 I have submitted Pull Requests and the goal is to eventually be able to use official versions.
 
