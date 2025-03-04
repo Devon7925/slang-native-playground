@@ -9,6 +9,11 @@ public struct playground_TIMEAttribute
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_DELTA_TIMEAttribute
+{
+};
+
+[__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_KEY_INPUTAttribute
 {
     string key;

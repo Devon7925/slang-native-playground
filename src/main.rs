@@ -27,10 +27,15 @@ use std::{
 };
 
 use compute_pipeline::ComputePipeline;
-use winit::{
-    application::ApplicationHandler, dpi::{PhysicalPosition, PhysicalSize}, event::{ElementState, MouseButton, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, keyboard::{Key, NamedKey}, window::{Window, WindowId}
-};
 use std::collections::HashSet;
+use winit::{
+    application::ApplicationHandler,
+    dpi::{PhysicalPosition, PhysicalSize},
+    event::{ElementState, MouseButton, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{Key, NamedKey},
+    window::{Window, WindowId},
+};
 
 struct MouseState {
     last_mouse_clicked_pos: PhysicalPosition<f64>,
@@ -80,6 +85,8 @@ struct State {
     mouse_state: MouseState,
     keyboard_state: KeyboardState,
     first_frame: bool,
+    delta_time: f32,
+    last_frame_time: std::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -209,9 +216,7 @@ async fn process_resource_commands(
                         GPUResource::Buffer(buffer),
                     );
                 }
-                ResourceCommandData::Model {
-                    data,
-                } => {
+                ResourceCommandData::Model { data } => {
                     let Some(binding_info) = resource_bindings.get(&resource_name) else {
                         panic!("Resource ${resource_name} is not defined in the bindings.");
                     };
@@ -427,8 +432,8 @@ async fn process_resource_commands(
                     ) {
                         panic!("Resource {} is an invalid type for BLACK_3D", resource_name);
                     }
-                    let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST;
+                    let mut usage =
+                        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
                     if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
                         usage |= wgpu::TextureUsages::STORAGE_BINDING;
                     }
@@ -639,13 +644,14 @@ async fn process_resource_commands(
                     };
 
                     if matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
-                        let Some(GPUResource::Texture(tex)) = allocated_resources.get(original_resource)
+                        let Some(GPUResource::Texture(tex)) =
+                            allocated_resources.get(original_resource)
                         else {
                             unprocessed_resource_commands
                                 .insert(resource_name.to_string(), command.clone());
                             continue;
                         };
-    
+
                         let texture = device.create_texture(&wgpu::TextureDescriptor {
                             label: None,
                             dimension: wgpu::TextureDimension::D2,
@@ -666,13 +672,14 @@ async fn process_resource_commands(
                             GPUResource::Texture(texture),
                         );
                     } else if matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
-                        let Some(GPUResource::Buffer(buf)) = allocated_resources.get(original_resource)
+                        let Some(GPUResource::Buffer(buf)) =
+                            allocated_resources.get(original_resource)
                         else {
                             unprocessed_resource_commands
                                 .insert(resource_name.to_string(), command.clone());
                             continue;
                         };
-    
+
                         let buffer = device.create_buffer(&BufferDescriptor {
                             label: None,
                             size: buf.size(),
@@ -685,7 +692,10 @@ async fn process_resource_commands(
                             GPUResource::Buffer(buffer),
                         );
                     } else {
-                        panic!("Resource {} is an invalid type for REBIND_FOR_DRAW", resource_name)
+                        panic!(
+                            "Resource {} is an invalid type for REBIND_FOR_DRAW",
+                            resource_name
+                        )
                     }
                 }
                 ResourceCommandData::SLIDER {
@@ -732,12 +742,12 @@ async fn process_resource_commands(
                     let buffer_default = [0u8; 8];
                     queue.write_buffer(buffer, offset as u64, &buffer_default);
                 }
-                ResourceCommandData::TIME { offset } => {
+                ResourceCommandData::Time { offset } => {
                     let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
                     else {
                         panic!("cannot get uniforms")
                     };
-                    // Initialize the buffer with zeros.
+                    // Initialize the buffer with current time.
                     let time = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -745,8 +755,18 @@ async fn process_resource_commands(
                     let buffer_default = time.to_le_bytes();
                     queue.write_buffer(buffer, offset as u64, &buffer_default);
                 }
+                ResourceCommandData::DeltaTime { offset } => {
+                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
+                    else {
+                        panic!("cannot get uniforms")
+                    };
+                    // Initialize the buffer with zeros.
+                    let buffer_default = 0f32.to_le_bytes();
+                    queue.write_buffer(buffer, offset as u64, &buffer_default);
+                }
                 ResourceCommandData::KeyInput { offset, .. } => {
-                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput") else {
+                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
+                    else {
                         panic!("cannot get uniforms")
                     };
                     // Initialize with key released state (0.0)
@@ -1180,6 +1200,8 @@ impl State {
             },
             keyboard_state: KeyboardState::new(),
             first_frame: true,
+            delta_time: 0.0,
+            last_frame_time: std::time::Instant::now(),
         };
 
         // Configure surface for the first time
@@ -1325,6 +1347,13 @@ impl State {
         };
 
         let mut buffer_data: Vec<u8> = vec![0; self.uniform_size as usize];
+
+        // Calculate delta time
+        let now = std::time::Instant::now();
+        let frame_time = now - self.last_frame_time;
+        self.delta_time = frame_time.as_secs_f32();
+        self.last_frame_time = now;
+
         for UniformController {
             buffer_offset,
             controller,
@@ -1335,12 +1364,14 @@ impl State {
                 UniformControllerType::SLIDER { value, .. } => {
                     let slice = [*value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
+                        .copy_from_slice(uniform_data);
                 }
                 UniformControllerType::COLORPICK { value, .. } => {
                     let slice = [*value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
+                        .copy_from_slice(uniform_data);
                 }
                 UniformControllerType::MOUSEPOSITION => {
                     let mut mouse_array = [0.0f32; 4];
@@ -1355,9 +1386,10 @@ impl State {
                         mouse_array[3] = -mouse_array[3];
                     }
                     let uniform_data = bytemuck::cast_slice(&mouse_array);
-                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
+                        .copy_from_slice(uniform_data);
                 }
-                UniformControllerType::TIME => {
+                UniformControllerType::Time => {
                     let start = SystemTime::now();
                     let since_the_epoch = start
                         .duration_since(UNIX_EPOCH)
@@ -1365,7 +1397,15 @@ impl State {
                     let value = since_the_epoch.as_millis() as u16 as f32 * 0.001;
                     let slice = [value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
+                        .copy_from_slice(uniform_data);
+                }
+                UniformControllerType::DeltaTime => {
+                    println!("dt: {}", self.delta_time);
+                    let slice = [self.delta_time];
+                    let uniform_data = bytemuck::cast_slice(&slice);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
+                        .copy_from_slice(uniform_data);
                 }
                 UniformControllerType::KeyInput { key } => {
                     let keycode = match key.to_lowercase().as_str() {
@@ -1389,7 +1429,8 @@ impl State {
                     };
                     let slice = [value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
+                        .copy_from_slice(uniform_data);
                 }
             }
         }
@@ -1420,7 +1461,11 @@ impl State {
                 ) => {
                     let resource = self.allocated_resources.get(resource_name).unwrap();
                     let size = match resource {
-                        GPUResource::Texture(texture) => [texture.width(), texture.height(), texture.depth_or_array_layers()],
+                        GPUResource::Texture(texture) => [
+                            texture.width(),
+                            texture.height(),
+                            texture.depth_or_array_layers(),
+                        ],
                         GPUResource::Buffer(buffer) => {
                             [buffer.size() as u32 / element_size.unwrap_or(4), 1, 1]
                         }
@@ -1811,7 +1856,10 @@ impl App {
                             ui.label(name.as_str());
                             ui.color_edit_button_rgb(value);
                         }
-                        UniformControllerType::MOUSEPOSITION | UniformControllerType::TIME | UniformControllerType::KeyInput { .. } => {
+                        UniformControllerType::MOUSEPOSITION
+                        | UniformControllerType::Time
+                        | UniformControllerType::DeltaTime
+                        | UniformControllerType::KeyInput { .. } => {
                             // do nothing for these types as they are internally managed
                         }
                     }
@@ -1875,8 +1923,7 @@ impl ApplicationHandler for App {
                     println!("The close button was pressed; stopping");
                     event_loop.exit();
                 }
-                WindowEvent::RedrawRequested => {
-                }
+                WindowEvent::RedrawRequested => {}
                 WindowEvent::Resized(new_size) => {
                     self.handle_resized(new_size.width, new_size.height);
                 }
@@ -1890,8 +1937,7 @@ impl ApplicationHandler for App {
                 println!("The close button was pressed; stopping");
                 event_loop.exit();
             }
-            WindowEvent::RedrawRequested => {
-            }
+            WindowEvent::RedrawRequested => {}
             WindowEvent::Resized(size) => {
                 state.resize(size);
             }
@@ -1914,7 +1960,7 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::KeyboardInput { 
+            WindowEvent::KeyboardInput {
                 event,
                 device_id: _,
                 is_synthetic: _,
@@ -1932,37 +1978,39 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         let state = self.state.as_mut().unwrap();
         state.render();
-        
+
         // Only handle debug window if in debug mode
         if cfg!(debug_assertions) {
             let debug_state = self.debug_app.as_mut().unwrap();
-            
+
             // Calculate time since last frame
             let now = std::time::Instant::now();
             let frame_time = now - debug_state.debug_panel.last_frame_time;
-                
+
             let instantaneous_fps = 1.0 / frame_time.as_secs_f32();
             debug_state.debug_panel.fps_samples.push(instantaneous_fps);
-            
+
             // Keep a rolling average of the last 60 frames
             if debug_state.debug_panel.fps_samples.len() > 60 {
                 debug_state.debug_panel.fps_samples.remove(0);
             }
-            
+
             // Calculate average FPS
-            debug_state.debug_panel.current_fps = debug_state.debug_panel.fps_samples.iter().sum::<f32>() 
-                / debug_state.debug_panel.fps_samples.len() as f32;
-            
+            debug_state.debug_panel.current_fps =
+                debug_state.debug_panel.fps_samples.iter().sum::<f32>()
+                    / debug_state.debug_panel.fps_samples.len() as f32;
+
             let debug_frame_time = now - debug_state.debug_panel.last_debug_frame_time;
-            
+
             // Target 60 FPS (16.67ms per frame)
-            let target_frame_time: std::time::Duration = std::time::Duration::from_secs_f32(1.0 / 60.0);
+            let target_frame_time: std::time::Duration =
+                std::time::Duration::from_secs_f32(1.0 / 60.0);
             debug_state.debug_panel.last_frame_time = now;
-            
+
             // Only redraw if enough time has passed since last frame
             if debug_frame_time >= target_frame_time {
                 debug_state.debug_panel.last_debug_frame_time = now;
-                
+
                 self.handle_redraw();
             }
         }

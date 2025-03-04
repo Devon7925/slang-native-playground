@@ -682,7 +682,21 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::TIME {
+                    Some(ResourceCommandData::Time {
+                        offset: parameter.offset(ParameterCategory::Uniform),
+                    })
+                } else if playground_attribute_name == "DELTA_TIME" {
+                    if parameter.ty().kind() != TypeKind::Scalar
+                        || parameter.ty().scalar_type() != ScalarType::Float32
+                        || parameter.category_by_index(0) != ParameterCategory::Uniform
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    Some(ResourceCommandData::DeltaTime {
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else {
@@ -699,7 +713,11 @@ impl SlangCompiler {
     }
 
     pub fn compile(&self, search_paths: Vec<&str>, entry_module_name: &str) -> CompilationResult {
-        let search_paths = search_paths.into_iter().map(std::ffi::CString::new).map(Result::unwrap).collect::<Vec<_>>();
+        let search_paths = search_paths
+            .into_iter()
+            .map(std::ffi::CString::new)
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
         let search_paths = search_paths.iter().map(|p| p.as_ptr()).collect::<Vec<_>>();
 
         // All compiler options are available through this builder.
@@ -788,13 +806,17 @@ impl SlangCompiler {
 fn parameter_texture_view_dimension(parameter: &VariableLayout) -> wgpu::TextureViewDimension {
     match parameter.ty().resource_shape() {
         ResourceShape::SlangTexture1d => wgpu::TextureViewDimension::D1,
-        ResourceShape::SlangTexture2d | ResourceShape::SlangTexture2dMultisample => wgpu::TextureViewDimension::D2,
+        ResourceShape::SlangTexture2d | ResourceShape::SlangTexture2dMultisample => {
+            wgpu::TextureViewDimension::D2
+        }
         ResourceShape::SlangTexture3d => wgpu::TextureViewDimension::D3,
         ResourceShape::SlangTextureCube => wgpu::TextureViewDimension::Cube,
         ResourceShape::SlangTexture1dArray => panic!("wgpu does not support 1d array textures"),
-        ResourceShape::SlangTexture2dArray | ResourceShape::SlangTexture2dMultisampleArray => wgpu::TextureViewDimension::D2Array,
+        ResourceShape::SlangTexture2dArray | ResourceShape::SlangTexture2dMultisampleArray => {
+            wgpu::TextureViewDimension::D2Array
+        }
         ResourceShape::SlangTextureCubeArray => panic!("wgpu does not support cube array textures"),
-        _ => panic!("Could not process resource shape")
+        _ => panic!("Could not process resource shape"),
     }
 }
 
@@ -1094,10 +1116,15 @@ fn get_uniform_sliders(
                 buffer_offset: *offset,
                 controller: UniformControllerType::MOUSEPOSITION,
             }),
-            ResourceCommandData::TIME { offset } => controllers.push(UniformController {
+            ResourceCommandData::Time { offset } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::TIME,
+                controller: UniformControllerType::Time,
+            }),
+            ResourceCommandData::DeltaTime { offset } => controllers.push(UniformController {
+                name: resource_name.clone(),
+                buffer_offset: *offset,
+                controller: UniformControllerType::DeltaTime,
             }),
             ResourceCommandData::KeyInput { key, offset } => controllers.push(UniformController {
                 name: resource_name.clone(),

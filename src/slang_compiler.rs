@@ -52,7 +52,10 @@ pub enum ResourceCommandData {
     MOUSEPOSITION {
         offset: usize,
     },
-    TIME {
+    Time {
+        offset: usize,
+    },
+    DeltaTime {
         offset: usize,
     },
     KeyInput {
@@ -79,7 +82,8 @@ pub enum UniformControllerType {
     SLIDER { value: f32, min: f32, max: f32 },
     COLORPICK { value: [f32; 3] },
     MOUSEPOSITION,
-    TIME,
+    Time,
+    DeltaTime,
     KeyInput { key: String },
 }
 

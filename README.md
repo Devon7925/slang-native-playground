@@ -41,6 +41,9 @@ This app also has a number of additional features that are not(yet) in the offic
 * `[playground::TIME]` on a `float` uniform gives the same output as `getTime()`
 * `[playground::MOUSEPOSITION]` on a `float4` uniform gives the same output as `getMousePosition()`
 
+### `[playground::DELTA_TIME]`
+Controls a float uniform to give the difference in time between frames. Useful for making things not break at high framerates.
+
 ### `playground::BLACK_SCREEN`
 
 Acts the same as `BLACK` but is automatically scaled based on screen size.
