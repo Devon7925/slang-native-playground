@@ -45,6 +45,10 @@ This app also has a number of additional features that are not(yet) in the offic
 
 Acts the same as `BLACK` but is automatically scaled based on screen size.
 
+### `playground::BLACK_3D`
+
+Acts the same as `BLACK` but for 3d textures.
+
 ### Draw features
 
 * `playground::DRAW` on a vertex shader allows creating a fixed size draw that will run every frame

@@ -10,9 +10,15 @@ pub enum ResourceCommandData {
         element_size: u32,
     },
     RAND(u32),
-    BLACK {
+    Black {
         width: u32,
         height: u32,
+        format: wgpu::TextureFormat,
+    },
+    Black3D {
+        size_x: u32,
+        size_y: u32,
+        size_z: u32,
         format: wgpu::TextureFormat,
     },
     BlackScreen {

@@ -99,7 +99,7 @@ impl SlangCompiler {
             slang::BindingType::Texture => Some(wgpu::BindingType::Texture {
                 multisampled: false,
                 sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: wgpu::TextureViewDimension::D2,
+                view_dimension: parameter_texture_view_dimension(parameter),
             }),
             slang::BindingType::MutableTeture => {
                 let format = global_layout
@@ -116,7 +116,7 @@ impl SlangCompiler {
                         format,
                         parameter.ty().resource_result_type(),
                     ),
-                    view_dimension: wgpu::TextureViewDimension::D2,
+                    view_dimension: parameter_texture_view_dimension(parameter),
                 })
             }
             slang::BindingType::ConstantBuffer => Some(wgpu::BindingType::Buffer {
@@ -320,9 +320,52 @@ impl SlangCompiler {
                         .element_type_layout()
                         .binding_range_image_format(offset);
 
-                    Some(ResourceCommandData::BLACK {
+                    Some(ResourceCommandData::Black {
                         width: width as u32,
                         height: height as u32,
+                        format: get_wgpu_format_from_slang_format(
+                            format,
+                            parameter.ty().resource_result_type(),
+                        ),
+                    })
+                } else if playground_attribute_name == "BLACK_3D" {
+                    if parameter.ty().kind() != TypeKind::Resource
+                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture3d
+                    {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports 3D textures",
+                            parameter.variable().name().unwrap()
+                        )
+                    }
+
+                    let size_x = attribute.argument_value_int(0).unwrap();
+                    let size_y = attribute.argument_value_int(1).unwrap();
+                    let size_z = attribute.argument_value_int(2).unwrap();
+                    macro_rules! check_positive {
+                        ($id:ident) => {
+                            if $id < 0 {
+                                panic!(
+                                    "{playground_attribute_name} {} for {} cannot have negative size",
+                                    stringify!($id),
+                                    parameter.variable().name().unwrap()
+                                )
+                            }
+                        };
+                    }
+
+                    check_positive!(size_x);
+                    check_positive!(size_y);
+                    check_positive!(size_z);
+
+                    let format = shader_reflection
+                        .global_params_type_layout()
+                        .element_type_layout()
+                        .binding_range_image_format(offset);
+
+                    Some(ResourceCommandData::Black3D {
+                        size_x: size_x as u32,
+                        size_y: size_y as u32,
+                        size_z: size_z as u32,
                         format: get_wgpu_format_from_slang_format(
                             format,
                             parameter.ty().resource_result_type(),
@@ -739,6 +782,19 @@ impl SlangCompiler {
             hashed_strings,
             uniform_size: get_uniform_size(shader_reflection),
         };
+    }
+}
+
+fn parameter_texture_view_dimension(parameter: &VariableLayout) -> wgpu::TextureViewDimension {
+    match parameter.ty().resource_shape() {
+        ResourceShape::SlangTexture1d => wgpu::TextureViewDimension::D1,
+        ResourceShape::SlangTexture2d | ResourceShape::SlangTexture2dMultisample => wgpu::TextureViewDimension::D2,
+        ResourceShape::SlangTexture3d => wgpu::TextureViewDimension::D3,
+        ResourceShape::SlangTextureCube => wgpu::TextureViewDimension::Cube,
+        ResourceShape::SlangTexture1dArray => panic!("wgpu does not support 1d array textures"),
+        ResourceShape::SlangTexture2dArray | ResourceShape::SlangTexture2dMultisampleArray => wgpu::TextureViewDimension::D2Array,
+        ResourceShape::SlangTextureCubeArray => panic!("wgpu does not support cube array textures"),
+        _ => panic!("Could not process resource shape")
     }
 }
 

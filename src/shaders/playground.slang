@@ -160,6 +160,14 @@ public struct playground_BLACKAttribute
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_BLACK_3DAttribute
+{
+    uint sizeX;
+    uint sizeY;
+    uint sizeZ;
+};
+
+[__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_BLACK_SCREENAttribute
 {
     float widthScale;

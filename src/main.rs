@@ -346,7 +346,7 @@ async fn process_resource_commands(
                         rand_float_resources.remove("outputBuffer").unwrap(),
                     );
                 }
-                ResourceCommandData::BLACK {
+                ResourceCommandData::Black {
                     width,
                     height,
                     format,
@@ -399,6 +399,68 @@ async fn process_resource_commands(
                             width,
                             height,
                             depth_or_array_layers: 1,
+                        },
+                    );
+
+                    safe_set(
+                        &mut allocated_resources,
+                        resource_name,
+                        GPUResource::Texture(texture),
+                    );
+                }
+                ResourceCommandData::Black3D {
+                    size_x,
+                    size_y,
+                    size_z,
+                    format,
+                } => {
+                    let size = size_x * size_y * size_z;
+                    let element_size = format.block_copy_size(None).unwrap();
+                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
+                        panic!("Resource {} is not defined in the bindings.", resource_name);
+                    };
+
+                    if !matches!(
+                        binding_info.ty,
+                        wgpu::BindingType::StorageTexture { .. }
+                            | wgpu::BindingType::Texture { .. }
+                    ) {
+                        panic!("Resource {} is an invalid type for BLACK_3D", resource_name);
+                    }
+                    let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST;
+                    if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
+                        usage |= wgpu::TextureUsages::STORAGE_BINDING;
+                    }
+                    let texture = device.create_texture(&wgpu::TextureDescriptor {
+                        label: None,
+                        dimension: wgpu::TextureDimension::D3,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        size: wgpu::Extent3d {
+                            width: size_x,
+                            height: size_y,
+                            depth_or_array_layers: size_z,
+                        },
+                        format,
+                        usage: usage,
+                        view_formats: &[],
+                    });
+
+                    // Initialize the texture with zeros.
+                    let zeros = vec![0; (size * element_size) as usize];
+                    queue.write_texture(
+                        texture.as_image_copy(),
+                        &zeros,
+                        wgpu::TexelCopyBufferLayout {
+                            bytes_per_row: Some(size_x * element_size),
+                            offset: 0,
+                            rows_per_image: Some(size_y),
+                        },
+                        wgpu::Extent3d {
+                            width: size_x,
+                            height: size_y,
+                            depth_or_array_layers: size_z,
                         },
                     );
 
@@ -1358,7 +1420,7 @@ impl State {
                 ) => {
                     let resource = self.allocated_resources.get(resource_name).unwrap();
                     let size = match resource {
-                        GPUResource::Texture(texture) => [texture.width(), texture.height(), 1],
+                        GPUResource::Texture(texture) => [texture.width(), texture.height(), texture.depth_or_array_layers()],
                         GPUResource::Buffer(buffer) => {
                             [buffer.size() as u32 / element_size.unwrap_or(4), 1, 1]
                         }
