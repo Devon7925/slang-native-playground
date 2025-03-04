@@ -1401,7 +1401,6 @@ impl State {
                         .copy_from_slice(uniform_data);
                 }
                 UniformControllerType::DeltaTime => {
-                    println!("dt: {}", self.delta_time);
                     let slice = [self.delta_time];
                     let uniform_data = bytemuck::cast_slice(&slice);
                     buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
