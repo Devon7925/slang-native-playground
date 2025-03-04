@@ -655,8 +655,9 @@ impl SlangCompiler {
         return commands;
     }
 
-    pub fn compile(&self, search_path: &str, entry_module_name: &str) -> CompilationResult {
-        let search_path = std::ffi::CString::new(search_path).unwrap();
+    pub fn compile(&self, search_paths: Vec<&str>, entry_module_name: &str) -> CompilationResult {
+        let search_paths = search_paths.into_iter().map(std::ffi::CString::new).map(Result::unwrap).collect::<Vec<_>>();
+        let search_paths = search_paths.iter().map(|p| p.as_ptr()).collect::<Vec<_>>();
 
         // All compiler options are available through this builder.
         let session_options = slang::CompilerOptions::default()
@@ -668,7 +669,6 @@ impl SlangCompiler {
             .profile(self.global_slang_session.find_profile("spirv_1_6"));
 
         let targets = [target_desc];
-        let search_paths = [search_path.as_ptr()];
 
         let session_desc = slang::SessionDesc::default()
             .targets(&targets)
@@ -1063,13 +1063,13 @@ fn main() {
 
     fs::create_dir_all("compiled_shaders").unwrap();
 
-    let compilation = compiler.compile("shaders", "user.slang");
+    let compilation = compiler.compile(vec!["shaders", "src/shaders"], "user.slang");
     let serialized =
         ron::ser::to_string_pretty(&compilation, ron::ser::PrettyConfig::default()).unwrap();
     let mut file = File::create("compiled_shaders/compiled.ron").unwrap();
     file.write_all(serialized.as_bytes()).unwrap();
 
-    let rand_float_compilation = compiler.compile("demos", "rand_float.slang");
+    let rand_float_compilation = compiler.compile(vec!["demos"], "rand_float.slang");
     let serialized =
         ron::ser::to_string_pretty(&rand_float_compilation, ron::ser::PrettyConfig::default())
             .unwrap();
