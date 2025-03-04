@@ -1124,10 +1124,6 @@ impl State {
         state
     }
 
-    fn get_window(&self) -> &Window {
-        &self.window
-    }
-
     fn configure_surface(&self) {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -1528,6 +1524,10 @@ impl State {
 
 struct DebugPanel {
     uniform_controllers: Arc<RefCell<Vec<UniformController>>>,
+    last_frame_time: std::time::Instant,
+    last_debug_frame_time: std::time::Instant,
+    current_fps: f32,
+    fps_samples: Vec<f32>,
 }
 
 pub struct AppState {
@@ -1586,7 +1586,7 @@ impl AppState {
             format: *swapchain_format,
             width,
             height,
-            present_mode: wgpu::PresentMode::Immediate,
+            present_mode: wgpu::PresentMode::Fifo, // Use vsync for debug window
             desired_maximum_frame_latency: 0,
             alpha_mode: swapchain_capabilities.alpha_modes[0],
             view_formats: vec![],
@@ -1648,6 +1648,10 @@ impl App {
 
         let debug_panel = DebugPanel {
             uniform_controllers: self.state.as_ref().unwrap().uniform_components.clone(),
+            last_frame_time: std::time::Instant::now(),
+            last_debug_frame_time: std::time::Instant::now(),
+            current_fps: 0.0,
+            fps_samples: Vec::new(),
         };
 
         let debug_state = AppState::new(
@@ -1722,6 +1726,8 @@ impl App {
         {
             state.egui_renderer.begin_frame(window);
             egui::CentralPanel::default().show(state.egui_renderer.context(), |ui| {
+                ui.heading(format!("FPS: {:.1}", state.debug_panel.current_fps));
+                ui.separator();
                 ui.heading("Uniforms:");
 
                 for UniformController {
@@ -1825,8 +1831,6 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
             }
             WindowEvent::Resized(size) => {
-                // Reconfigures the size of the surface. We do not re-render
-                // here as this event is always folloed up by redraw request.
                 state.resize(size);
             }
             WindowEvent::CursorMoved {
@@ -1865,11 +1869,40 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         let state = self.state.as_mut().unwrap();
-        state.render(); // Single render call
+        state.render();
         
-        // Only request redraws if needed
+        // Only handle debug window if in debug mode
         if cfg!(debug_assertions) {
-            self.handle_redraw();
+            let debug_state = self.debug_app.as_mut().unwrap();
+            
+            // Calculate time since last frame
+            let now = std::time::Instant::now();
+            let frame_time = now - debug_state.debug_panel.last_frame_time;
+                
+            let instantaneous_fps = 1.0 / frame_time.as_secs_f32();
+            debug_state.debug_panel.fps_samples.push(instantaneous_fps);
+            
+            // Keep a rolling average of the last 60 frames
+            if debug_state.debug_panel.fps_samples.len() > 60 {
+                debug_state.debug_panel.fps_samples.remove(0);
+            }
+            
+            // Calculate average FPS
+            debug_state.debug_panel.current_fps = debug_state.debug_panel.fps_samples.iter().sum::<f32>() 
+                / debug_state.debug_panel.fps_samples.len() as f32;
+            
+            let debug_frame_time = now - debug_state.debug_panel.last_debug_frame_time;
+            
+            // Target 60 FPS (16.67ms per frame)
+            let target_frame_time: std::time::Duration = std::time::Duration::from_secs_f32(1.0 / 60.0);
+            debug_state.debug_panel.last_frame_time = now;
+            
+            // Only redraw if enough time has passed since last frame
+            if debug_frame_time >= target_frame_time {
+                debug_state.debug_panel.last_debug_frame_time = now;
+                
+                self.handle_redraw();
+            }
         }
     }
 }
