@@ -1786,6 +1786,8 @@ impl ApplicationHandler for App {
             pollster::block_on(self.set_window(debug_window));
         }
 
+        self.state.as_ref().unwrap().window.focus_window();
+
         window.request_redraw();
     }
 
