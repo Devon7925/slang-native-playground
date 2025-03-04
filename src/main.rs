@@ -1138,7 +1138,7 @@ impl State {
             width: self.size.width,
             height: self.size.height,
             desired_maximum_frame_latency: 2,
-            present_mode: wgpu::PresentMode::AutoVsync,
+            present_mode: wgpu::PresentMode::Immediate,
         };
         self.surface.configure(&self.device, &surface_config);
     }
@@ -1586,7 +1586,7 @@ impl AppState {
             format: *swapchain_format,
             width,
             height,
-            present_mode: wgpu::PresentMode::AutoVsync,
+            present_mode: wgpu::PresentMode::Immediate,
             desired_maximum_frame_latency: 0,
             alpha_mode: swapchain_capabilities.alpha_modes[0],
             view_formats: vec![],
@@ -1787,8 +1787,6 @@ impl ApplicationHandler for App {
         }
 
         self.state.as_ref().unwrap().window.focus_window();
-
-        window.request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -1810,9 +1808,6 @@ impl ApplicationHandler for App {
                     event_loop.exit();
                 }
                 WindowEvent::RedrawRequested => {
-                    self.handle_redraw();
-
-                    self.debug_window.as_ref().unwrap().request_redraw();
                 }
                 WindowEvent::Resized(new_size) => {
                     self.handle_resized(new_size.width, new_size.height);
@@ -1828,9 +1823,6 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                state.render();
-                // Emits a new redraw requested event.
-                state.get_window().request_redraw();
             }
             WindowEvent::Resized(size) => {
                 // Reconfigures the size of the surface. We do not re-render
@@ -1873,8 +1865,12 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         let state = self.state.as_mut().unwrap();
-        state.render();
-        state.get_window().request_redraw();
+        state.render(); // Single render call
+        
+        // Only request redraws if needed
+        if cfg!(debug_assertions) {
+            self.handle_redraw();
+        }
     }
 }
 
