@@ -74,6 +74,7 @@ struct State {
     call_commands: Vec<CallCommand>,
     draw_commands: Vec<DrawCommand>,
     uniform_components: Arc<RefCell<Vec<UniformController>>>,
+    uniform_size: u64,
     hashed_strings: HashMap<u32, String>,
     allocated_resources: HashMap<String, GPUResource>,
     mouse_state: MouseState,
@@ -1105,6 +1106,7 @@ impl State {
             call_commands: compilation.call_commands,
             draw_commands: compilation.draw_commands,
             uniform_components: Arc::new(RefCell::new(compilation.uniform_controllers)),
+            uniform_size: compilation.uniform_size,
             hashed_strings: compilation.hashed_strings,
             allocated_resources,
             mouse_state: MouseState {
@@ -1260,6 +1262,7 @@ impl State {
             panic!("uniformInput doesn't exist or is of incorrect type");
         };
 
+        let mut buffer_data: Vec<u8> = vec![0; self.uniform_size as usize];
         for UniformController {
             buffer_offset,
             controller,
@@ -1270,14 +1273,12 @@ impl State {
                 UniformControllerType::SLIDER { value, .. } => {
                     let slice = [*value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    self.queue
-                        .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
                 }
                 UniformControllerType::COLORPICK { value, .. } => {
                     let slice = [*value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    self.queue
-                        .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
                 }
                 UniformControllerType::MOUSEPOSITION => {
                     let mut mouse_array = [0.0f32; 4];
@@ -1292,8 +1293,7 @@ impl State {
                         mouse_array[3] = -mouse_array[3];
                     }
                     let uniform_data = bytemuck::cast_slice(&mouse_array);
-                    self.queue
-                        .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
                 }
                 UniformControllerType::TIME => {
                     let start = SystemTime::now();
@@ -1303,8 +1303,7 @@ impl State {
                     let value = since_the_epoch.as_millis() as u16 as f32 * 0.001;
                     let slice = [value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    self.queue
-                        .write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
                 }
                 UniformControllerType::KeyInput { key } => {
                     let keycode = match key.to_lowercase().as_str() {
@@ -1328,10 +1327,11 @@ impl State {
                     };
                     let slice = [value];
                     let uniform_data = bytemuck::cast_slice(&slice);
-                    self.queue.write_buffer(uniform_input, *buffer_offset as u64, uniform_data);
+                    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
                 }
             }
         }
+        self.queue.write_buffer(uniform_input, 0, &buffer_data);
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
