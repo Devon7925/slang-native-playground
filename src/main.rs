@@ -17,14 +17,7 @@ use tokio::runtime;
 use url::{ParseError, Url};
 use wgpu::{BufferDescriptor, Extent3d, Features, SurfaceError};
 
-use std::{
-    borrow::Cow,
-    cell::RefCell,
-    collections::HashMap,
-    fs::read,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{borrow::Cow, cell::RefCell, collections::HashMap, fs::read, sync::Arc};
 
 use compute_pipeline::ComputePipeline;
 use std::collections::HashSet;
@@ -34,6 +27,7 @@ use winit::{
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, NamedKey},
+    platform::modifier_supplement::KeyEventExtModifierSupplement,
     window::{Window, WindowId},
 };
 
@@ -87,6 +81,7 @@ struct State {
     first_frame: bool,
     delta_time: f32,
     last_frame_time: std::time::Instant,
+    launch_time: std::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -739,7 +734,7 @@ async fn process_resource_commands(
                         panic!("cannot get uniforms")
                     };
                     // Initialize the buffer with zeros.
-                    let buffer_default = [0u8; 8];
+                    let buffer_default = [0u8; 16];
                     queue.write_buffer(buffer, offset as u64, &buffer_default);
                 }
                 ResourceCommandData::Time { offset } => {
@@ -748,10 +743,7 @@ async fn process_resource_commands(
                         panic!("cannot get uniforms")
                     };
                     // Initialize the buffer with current time.
-                    let time = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs_f32();
+                    let time = 0.0f32;
                     let buffer_default = time.to_le_bytes();
                     queue.write_buffer(buffer, offset as u64, &buffer_default);
                 }
@@ -1202,6 +1194,7 @@ impl State {
             first_frame: true,
             delta_time: 0.0,
             last_frame_time: std::time::Instant::now(),
+            launch_time: std::time::Instant::now(),
         };
 
         // Configure surface for the first time
@@ -1390,11 +1383,9 @@ impl State {
                         .copy_from_slice(uniform_data);
                 }
                 UniformControllerType::Time => {
-                    let start = SystemTime::now();
-                    let since_the_epoch = start
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards");
-                    let value = since_the_epoch.as_millis() as u16 as f32 * 0.001;
+                    let value = std::time::Instant::now()
+                        .duration_since(self.launch_time)
+                        .as_secs_f32();
                     let slice = [value];
                     let uniform_data = bytemuck::cast_slice(&slice);
                     buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
@@ -1964,7 +1955,7 @@ impl ApplicationHandler for App {
                 device_id: _,
                 is_synthetic: _,
             } => {
-                let keycode = event.logical_key;
+                let keycode = event.key_without_modifiers();
                 match event.state {
                     ElementState::Pressed => state.key_pressed(keycode),
                     ElementState::Released => state.key_released(keycode),

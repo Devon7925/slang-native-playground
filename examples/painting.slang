@@ -1,7 +1,7 @@
 import playground;
 
-const static int MAX_BRUSH_SIZE = 64;
-const static float FLOAT_MAX_BRUSH_SIZE = 64.0;
+static const int MAX_BRUSH_SIZE = 64;
+static const float FLOAT_MAX_BRUSH_SIZE = 64.0;
 
 [playground::BLACK_SCREEN(1.0, 1.0)]
 RWTexture2D<float> tex_red;
@@ -13,7 +13,7 @@ RWTexture2D<float> tex_blue;
 [playground::ZEROS(8)]
 RWStructuredBuffer<uint> indirectBuffer;
 
-const static uint thread_count = 8;
+static const uint thread_count = 8;
 
 [playground::SLIDER(10.0, 4.0, 64.0)]
 uniform float brush_size;

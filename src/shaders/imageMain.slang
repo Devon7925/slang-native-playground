@@ -41,7 +41,7 @@ struct VOut
     float2 texcoord;
 }
 
-const static Vertex[] verticies = {
+static const Vertex[] verticies = {
     Vertex(float2(-1.0, -1.0), float2(0.0, 0.0)),
     Vertex(float2(1.0, -1.0), float2(1.0, 0.0)),
     Vertex(float2(-1.0, 1.0), float2(0.0, 1.0)),
@@ -62,7 +62,8 @@ VOut vertexMain(uint vertexID: SV_VertexID)
 }
 
 [shader("fragment")]
-float4 fragmentMain(VOut input) : SV_Target
+float4 fragmentMain(VOut input)
+    : SV_Target
 {
     let color = drawTexture.Sample(sampler, input.texcoord);
     return color;

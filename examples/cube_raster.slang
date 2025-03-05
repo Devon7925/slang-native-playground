@@ -29,48 +29,54 @@ struct VOut
     float2 texcoord;
 }
 
-const static Vertex[] verticies = {
-    Vertex(float3(-1.0, -1.0,  1.0), float3(0.0, 0.0, 1.0), float2(0.0, 0.0)),
-    Vertex(float3( 1.0, -1.0,  1.0), float3(0.0, 0.0, 1.0), float2(1.0, 0.0)),
-    Vertex(float3(-1.0,  1.0,  1.0), float3(0.0, 0.0, 1.0), float2(0.0, 1.0)),
-    Vertex(float3(-1.0,  1.0,  1.0), float3(0.0, 0.0, 1.0), float2(0.0, 1.0)),
-    Vertex(float3( 1.0, -1.0,  1.0), float3(0.0, 0.0, 1.0), float2(1.0, 0.0)),
-    Vertex(float3( 1.0,  1.0,  1.0), float3(0.0, 0.0, 1.0), float2(1.0, 1.0)),
+static const Vertex[] cube_verticies = {
+    // +Z face
+    Vertex(float3(-1.0, -1.0, 1.0), float3(0.0, 0.0, 1.0), float2(0.0, 0.0)),
+    Vertex(float3(1.0, -1.0, 1.0), float3(0.0, 0.0, 1.0), float2(1.0, 0.0)),
+    Vertex(float3(-1.0, 1.0, 1.0), float3(0.0, 0.0, 1.0), float2(0.0, 1.0)),
+    Vertex(float3(-1.0, 1.0, 1.0), float3(0.0, 0.0, 1.0), float2(0.0, 1.0)),
+    Vertex(float3(1.0, -1.0, 1.0), float3(0.0, 0.0, 1.0), float2(1.0, 0.0)),
+    Vertex(float3(1.0, 1.0, 1.0), float3(0.0, 0.0, 1.0), float2(1.0, 1.0)),
 
+    // -Z face
     Vertex(float3(-1.0, -1.0, -1.0), float3(0.0, 0.0, -1.0), float2(0.0, 0.0)),
-    Vertex(float3( 1.0, -1.0, -1.0), float3(0.0, 0.0, -1.0), float2(1.0, 0.0)),
-    Vertex(float3(-1.0,  1.0, -1.0), float3(0.0, 0.0, -1.0), float2(0.0, 1.0)),
-    Vertex(float3(-1.0,  1.0, -1.0), float3(0.0, 0.0, -1.0), float2(0.0, 1.0)),
-    Vertex(float3( 1.0, -1.0, -1.0), float3(0.0, 0.0, -1.0), float2(1.0, 0.0)),
-    Vertex(float3( 1.0,  1.0, -1.0), float3(0.0, 0.0, -1.0), float2(1.0, 1.0)),
+    Vertex(float3(1.0, -1.0, -1.0), float3(0.0, 0.0, -1.0), float2(1.0, 0.0)),
+    Vertex(float3(-1.0, 1.0, -1.0), float3(0.0, 0.0, -1.0), float2(0.0, 1.0)),
+    Vertex(float3(-1.0, 1.0, -1.0), float3(0.0, 0.0, -1.0), float2(0.0, 1.0)),
+    Vertex(float3(1.0, -1.0, -1.0), float3(0.0, 0.0, -1.0), float2(1.0, 0.0)),
+    Vertex(float3(1.0, 1.0, -1.0), float3(0.0, 0.0, -1.0), float2(1.0, 1.0)),
 
-    Vertex(float3(-1.0,  1.0, -1.0), float3(0.0, 1.0, 0.0), float2(0.0, 0.0)),
-    Vertex(float3( 1.0,  1.0, -1.0), float3(0.0, 1.0, 0.0), float2(1.0, 0.0)),
-    Vertex(float3(-1.0,  1.0,  1.0), float3(0.0, 1.0, 0.0), float2(0.0, 1.0)),
-    Vertex(float3(-1.0,  1.0,  1.0), float3(0.0, 1.0, 0.0), float2(0.0, 1.0)),
-    Vertex(float3( 1.0,  1.0, -1.0), float3(0.0, 1.0, 0.0), float2(1.0, 0.0)),
-    Vertex(float3( 1.0,  1.0,  1.0), float3(0.0, 1.0, 0.0), float2(1.0, 1.0)),
+    // +Y face
+    Vertex(float3(-1.0, 1.0, -1.0), float3(0.0, 1.0, 0.0), float2(0.0, 0.0)),
+    Vertex(float3(1.0, 1.0, -1.0), float3(0.0, 1.0, 0.0), float2(1.0, 0.0)),
+    Vertex(float3(-1.0, 1.0, 1.0), float3(0.0, 1.0, 0.0), float2(0.0, 1.0)),
+    Vertex(float3(-1.0, 1.0, 1.0), float3(0.0, 1.0, 0.0), float2(0.0, 1.0)),
+    Vertex(float3(1.0, 1.0, -1.0), float3(0.0, 1.0, 0.0), float2(1.0, 0.0)),
+    Vertex(float3(1.0, 1.0, 1.0), float3(0.0, 1.0, 0.0), float2(1.0, 1.0)),
 
+    // -Y face
     Vertex(float3(-1.0, -1.0, -1.0), float3(0.0, -1.0, 0.0), float2(0.0, 0.0)),
-    Vertex(float3( 1.0, -1.0, -1.0), float3(0.0, -1.0, 0.0), float2(1.0, 0.0)),
-    Vertex(float3(-1.0, -1.0,  1.0), float3(0.0, -1.0, 0.0), float2(0.0, 1.0)),
-    Vertex(float3(-1.0, -1.0,  1.0), float3(0.0, -1.0, 0.0), float2(0.0, 1.0)),
-    Vertex(float3( 1.0, -1.0, -1.0), float3(0.0, -1.0, 0.0), float2(1.0, 0.0)),
-    Vertex(float3( 1.0, -1.0,  1.0), float3(0.0, -1.0, 0.0), float2(1.0, 1.0)),
+    Vertex(float3(1.0, -1.0, -1.0), float3(0.0, -1.0, 0.0), float2(1.0, 0.0)),
+    Vertex(float3(-1.0, -1.0, 1.0), float3(0.0, -1.0, 0.0), float2(0.0, 1.0)),
+    Vertex(float3(-1.0, -1.0, 1.0), float3(0.0, -1.0, 0.0), float2(0.0, 1.0)),
+    Vertex(float3(1.0, -1.0, -1.0), float3(0.0, -1.0, 0.0), float2(1.0, 0.0)),
+    Vertex(float3(1.0, -1.0, 1.0), float3(0.0, -1.0, 0.0), float2(1.0, 1.0)),
 
-    Vertex(float3( 1.0, -1.0, -1.0), float3( 1.0, 0.0, 0.0), float2(0.0, 0.0)),
-    Vertex(float3( 1.0,  1.0, -1.0), float3( 1.0, 0.0, 0.0), float2(1.0, 0.0)),
-    Vertex(float3( 1.0, -1.0,  1.0), float3( 1.0, 0.0, 0.0), float2(0.0, 1.0)),
-    Vertex(float3( 1.0, -1.0,  1.0), float3( 1.0, 0.0, 0.0), float2(0.0, 1.0)),
-    Vertex(float3( 1.0,  1.0, -1.0), float3( 1.0, 0.0, 0.0), float2(1.0, 0.0)),
-    Vertex(float3( 1.0,  1.0,  1.0), float3( 1.0, 0.0, 0.0), float2(1.0, 1.0)),
+    // +X face
+    Vertex(float3(1.0, -1.0, -1.0), float3(1.0, 0.0, 0.0), float2(0.0, 0.0)),
+    Vertex(float3(1.0, 1.0, -1.0), float3(1.0, 0.0, 0.0), float2(1.0, 0.0)),
+    Vertex(float3(1.0, -1.0, 1.0), float3(1.0, 0.0, 0.0), float2(0.0, 1.0)),
+    Vertex(float3(1.0, -1.0, 1.0), float3(1.0, 0.0, 0.0), float2(0.0, 1.0)),
+    Vertex(float3(1.0, 1.0, -1.0), float3(1.0, 0.0, 0.0), float2(1.0, 0.0)),
+    Vertex(float3(1.0, 1.0, 1.0), float3(1.0, 0.0, 0.0), float2(1.0, 1.0)),
 
+    // -X face
     Vertex(float3(-1.0, -1.0, -1.0), float3(-1.0, 0.0, 0.0), float2(0.0, 0.0)),
-    Vertex(float3(-1.0,  1.0, -1.0), float3(-1.0, 0.0, 0.0), float2(1.0, 0.0)),
-    Vertex(float3(-1.0, -1.0,  1.0), float3(-1.0, 0.0, 0.0), float2(0.0, 1.0)),
-    Vertex(float3(-1.0, -1.0,  1.0), float3(-1.0, 0.0, 0.0), float2(0.0, 1.0)),
-    Vertex(float3(-1.0,  1.0, -1.0), float3(-1.0, 0.0, 0.0), float2(1.0, 0.0)),
-    Vertex(float3(-1.0,  1.0,  1.0), float3(-1.0, 0.0, 0.0), float2(1.0, 1.0)),
+    Vertex(float3(-1.0, 1.0, -1.0), float3(-1.0, 0.0, 0.0), float2(1.0, 0.0)),
+    Vertex(float3(-1.0, -1.0, 1.0), float3(-1.0, 0.0, 0.0), float2(0.0, 1.0)),
+    Vertex(float3(-1.0, -1.0, 1.0), float3(-1.0, 0.0, 0.0), float2(0.0, 1.0)),
+    Vertex(float3(-1.0, 1.0, -1.0), float3(-1.0, 0.0, 0.0), float2(1.0, 0.0)),
+    Vertex(float3(-1.0, 1.0, 1.0), float3(-1.0, 0.0, 0.0), float2(1.0, 1.0)),
 };
 // Function to create a view matrix from camera position, target position, and up vector
 float4x4 CreateViewMatrix(float3 eye, float3 target, float3 up)
@@ -120,10 +126,10 @@ VOut vertexMain(uint vertexID: SV_VertexID)
 
     float aspectRatio = float(imageW) / float(imageH);
 
-    float2 cameraControl = float2(1.0, -1.0) * -3.141592/2.0 * (2.0 * getMousePosition().xy / float2(imageW, imageH) - 1.0);
+    float2 cameraControl = float2(1.0, -1.0) * -3.141592 / 2.0 * (2.0 * getMousePosition().xy / float2(imageW, imageH) - 1.0);
     float3 cameraPos = float3(5.0 * sin(cameraControl.x) * cos(cameraControl.y), 5.0 * sin(cameraControl.y), 5.0 * cos(cameraControl.x) * cos(cameraControl.y));
 
-    Vertex input = verticies[vertexID];
+    Vertex input = cube_verticies[vertexID];
     VOut output;
     float4x4 viewMatrix = CreateViewMatrix(cameraPos, float3(0, 0, 0), float3(0, 1, 0));
     float4x4 perspectiveMatrix = CreatePerspectiveMatrix(3.1415 / 2, aspectRatio, 0.1, 100.0);
@@ -139,7 +145,8 @@ VOut vertexMain(uint vertexID: SV_VertexID)
 static const float3 lightPos = float3(2.0, 3.0, 4.0);
 
 [shader("fragment")]
-float4 fragmentMain(VOut input) : SV_Target
+float4 fragmentMain(VOut input)
+    : SV_Target
 {
     float4 albedo = cubeTexture.Sample(sampler, input.texcoord);
     float3 diff = lightPos - input.originalPosition;
