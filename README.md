@@ -93,13 +93,11 @@ struct Vertex
 
 ## Examples
 
-There are examples of use of the extra features in the `examples` folder.
+There are examples of use of the extra features in the `examples` folder. For single files, replace `user.slang` with their contents. For folders, replace the whole contents of `shaders/` with their contents.
 | Name | Description |
 |------|--------|
 | `cube_raster.slang` | Textured cube rasterizer with basic lighting |
 | `free_flight_camera.slang` | A rasterizer of the Utah Teacup with keyboard control for the camera |
 | `painting.slang` | A simple painting app demonstrating storage textures and indirect dispatch |
-
-I have submitted Pull Requests and the goal is to eventually be able to use official versions.
-
+| `voxels/` | A voxel rendering engine with simple falling sand physics |
 
