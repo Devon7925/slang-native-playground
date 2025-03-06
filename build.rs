@@ -49,14 +49,18 @@ impl SlangCompiler {
         slang_session: &slang::Session,
         component_list: &mut Vec<slang::ComponentType>,
     ) {
-        let count = user_module.entry_point_count();
-        for i in 0..count {
-            let entry_point = user_module.entry_point_by_index(i).unwrap();
-            component_list.push(entry_point.downcast().clone());
+        for imported_file in user_module.dependency_file_paths() {
+            let module = slang_session.load_module(imported_file).unwrap();
+
+            component_list.push(module.downcast().clone());
+
+            for entry_point in module.entry_points() {
+                component_list.push(entry_point.downcast().clone());
+            }
         }
 
         let program = slang_session
-            .create_composite_component_type(&[user_module.downcast().clone()])
+            .create_composite_component_type(component_list)
             .unwrap();
         let linked_program = program.link().unwrap();
         let shader_reflection = linked_program.layout(0).unwrap();
@@ -72,9 +76,7 @@ impl SlangCompiler {
 
                 component_list.push(module.downcast().clone());
 
-                let count = module.entry_point_count();
-                for i in 0..count {
-                    let entry_point = module.entry_point_by_index(i).unwrap();
+                for entry_point in module.entry_points() {
                     component_list.push(entry_point.downcast().clone());
                 }
             }
