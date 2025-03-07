@@ -4,8 +4,13 @@ import common;
 [playground::BLACK_3D(256, 128, 256)]
 RWTexture3D<uint> voxels;
 
-[playground::ZEROS(8)]
-RWStructuredBuffer<float> playerData;
+struct GameData {
+    float3 playerPos;
+    int voxelOffset;
+}
+
+[playground::ZEROS(1)]
+RWStructuredBuffer<GameData> playerData;
 
 [playground::ZEROS(8)]
 RWStructuredBuffer<uint> indirectBuffer;
@@ -18,7 +23,7 @@ float3 getCameraDirection(float2 imageSize)
 
 int3 get_voxel_update_offset()
 {
-    let idx = int(playerData[3]);
+    let idx = int(playerData[0].voxelOffset);
     return int3(idx & 1, (idx >> 1) & 1, (idx >> 2) & 1);
 }
 

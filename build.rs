@@ -937,6 +937,12 @@ fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {
             let count = resource_result_type.element_count().next_power_of_two() as u32;
             count * get_size(resource_result_type.element_type())
         }
+        TypeKind::Struct => {
+            resource_result_type
+                .fields()
+                .map(|f| get_size(f.ty()))
+                .fold(0, |a, f| (a + f + f - 1) / f * f)
+        }
         _ => panic!("Unimplemented type for get_size"),
     }
 }

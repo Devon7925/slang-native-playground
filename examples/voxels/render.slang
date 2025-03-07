@@ -602,7 +602,7 @@ float4 imageMain(uint2 dispatchThreadID, int2 screenSize)
 
     let ray = normalize(cameraDir + uv.x * cameraLeft + uv.y * cameraUp);
 
-    var pos = float3(playerData[0], playerData[1], playerData[2]);
+    var pos = playerData[0].playerPos;
 
     RaycastResult primary_ray = raycast(pos, ray, primary_ray_dist);
 

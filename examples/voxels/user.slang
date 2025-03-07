@@ -37,9 +37,7 @@ uniform float4 mouse;
 [playground::CALL(1, 1, 1)]
 void setup(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
-    playerData[0] = 10.0;
-    playerData[1] = 100.0;
-    playerData[2] = 10.0;
+    playerData[0].playerPos = float3(10.0, 100.0, 10.0);
 
     uint3 voxelSize;
     voxels.GetDimensions(voxelSize.x, voxelSize.y, voxelSize.z);
@@ -56,7 +54,7 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
     uint2 imageSize;
     screen.GetDimensions(imageSize.x, imageSize.y);
 
-    float3 cameraPos = float3(playerData[0], playerData[1], playerData[2]);
+    float3 cameraPos = playerData[0].playerPos;
 
     float3 cameraDir = getCameraDirection(float2(imageSize));
     float3 up = float3(0.0, 1.0, 0.0);
@@ -67,11 +65,9 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
 
     cameraPos += mul(inputVector, inputTransform);
 
-    playerData[0] = cameraPos.x;
-    playerData[1] = cameraPos.y;
-    playerData[2] = cameraPos.z;
+    playerData[0].playerPos = cameraPos;
 
-    playerData[3] = (playerData[3] + 1.0) % 8.0;
+    playerData[0].voxelOffset = (playerData[0].voxelOffset + 1) % 8;
 }
 
 float4 imageMain(uint2 dispatchThreadID, int2 screenSize)
@@ -84,7 +80,7 @@ float4 imageMain(uint2 dispatchThreadID, int2 screenSize)
 
     let ray = normalize(cameraDir + uv.x * cameraLeft + uv.y * cameraUp);
 
-    var pos = float3(playerData[0], playerData[1], playerData[2]);
+    var pos = playerData[0].playerPos;
 
     RaycastResult primary_ray = raycast(pos, ray, primary_ray_dist);
 
