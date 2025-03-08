@@ -15,7 +15,7 @@ static const float PI = 3.14159265359;
 struct Projectile
 {
     float4 pos;
-    uint4 chunk_update_pos;
+    int4 chunk_update_pos;
     float4 dir;
     float4 size;
     float vel;
@@ -269,17 +269,18 @@ static const MaterialRenderProps material_render_props[] = {
         0.04, 0.8, 0.0, 0.0, float3(0.15)),
 };
 
-uint4 get_indicies(uint3 global_pos, uint3 render_size)
-{
-    uint3 chunk_pos = (global_pos >> CHUNK_MAGNITUDE) % render_size;
-    uint3 pos_in_chunk = global_pos & POS_IN_CHUNK_MASK;
-    uint idx_in_chunk = pos_in_chunk.x * CHUNK_SIZE * CHUNK_SIZE + pos_in_chunk.y * CHUNK_SIZE + pos_in_chunk.z;
-    return uint4(chunk_pos, idx_in_chunk);
-}
-
 uint get_dist(uint voxel_data, uint offset)
 {
     return (voxel_data >> (offset * 3)) & 0x7;
+}
+
+vector<int, N> floorDiv<let N: int>(vector<int, N> a, vector<int, N> b) {
+    return (a / b) - ((a % b) != 0 && (a < 0));
+}
+
+vector<int, N> floorMod<let N : int>(vector<int, N> a, vector<int, N> b) {
+    vector<int, N> mod = a % b;
+    return select(mod < 0, mod + abs(b), mod);
 }
 
 float3 quat_transform(float4 q, float3 v)
@@ -316,7 +317,7 @@ float4 quaternion_from_arc(float3 src, float3 dst)
     }
 }
 
-uint2 pcg2d(uint2 v)
+int2 pcg2d(int2 v)
 {
     v = v * 1664525u + 1013904223u;
 
@@ -373,7 +374,7 @@ float4 voronoise(in float3 p, float u, float v)
 {
     float k = 1.0 + 63.0 * pow(1.0 - v, 6.0);
 
-    int4 i = int4(int3(p), 0);
+    int4 i = int4(int3(floor(p)), 0);
     float3 f = fract(p);
 
     float2 a = float2(0.0, 0.0);

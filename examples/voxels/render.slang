@@ -590,26 +590,3 @@ float3 get_color(float3 pos, float3 ray, RaycastResult primary_ray, uint vertica
 
     return color;
 }
-
-float4 imageMain(uint2 dispatchThreadID, int2 screenSize)
-{
-    let uv = 2.0 * (float2(dispatchThreadID) / float2(screenSize)) - 1.0;
-    // do simple sphere sdf raymarching
-    let cameraDir = getCameraDirection(screenSize);
-    let up = float3(0.0, 1.0, 0.0);
-    let cameraLeft = -normalize(cross(up, cameraDir));
-    let cameraUp = cross(cameraLeft, cameraDir);
-
-    let ray = normalize(cameraDir + uv.x * cameraLeft + uv.y * cameraUp);
-
-    var pos = playerData[0].playerPos;
-
-    RaycastResult primary_ray = raycast(pos, ray, primary_ray_dist);
-
-    if (primary_ray.layer_count == 0)
-    {
-        return float4(1.0, 0.0, 0.0, 1.0);
-    }
-
-    return float4(get_color(pos, ray, primary_ray, screenSize.y), 1.0);
-}

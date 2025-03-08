@@ -2,18 +2,8 @@ import playground;
 import common;
 import binding;
 
-void set_data(int3 global_pos, uint data)
-{
-    uint og_voxel_data = get_data(global_pos);
-    if (og_voxel_data >> 24 == MAT_OOB)
-        return;
-    if (og_voxel_data >> 24 == MAT_AIR_OOB)
-        return;
-    voxels.Store(get_index(global_pos), data);
-}
-
 [numthreads(VOXEL_UPDATE_SIZE, VOXEL_UPDATE_SIZE, VOXEL_UPDATE_SIZE)]
-[playground::CALL_INDIRECT("indirectBuffer", 0)]
+// [playground::CALL_INDIRECT("indirectBuffer", 0)]
 void voxelUpdate(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
     int3 pos = 2 * dispatchThreadId + get_voxel_update_offset();

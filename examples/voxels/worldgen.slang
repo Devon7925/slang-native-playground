@@ -42,9 +42,9 @@ float4 mul_gradient(float4 a, float4 b)
     return float4(a.xyz * b.w + a.w * b.xyz, a.w * b.w);
 }
 
-public uint get_worldgen(uint3 global_pos)
+public uint get_worldgen(int3 global_pos)
 {
-    uint2 chunk_pos = global_pos.xz / 32;
+    int2 chunk_pos = floorDiv(global_pos.xz, 32);
     float3 tree_pos = 32.0 * float3(chunk_pos, 0.0) + 3.0 + 26.0 * float3(pcg3d(chunk_pos.xxy).xyz & 0xFF) / 256.0;
     tree_pos.z = tree_pos.z / 100.0 + 0.2;
     float3 random = float3(pcg3d(global_pos) & 0xFF) / 128.0;
@@ -111,13 +111,17 @@ public uint get_worldgen(uint3 global_pos)
     return MAT_AIR << 24;
 }
 
-[playground::CALL_ONCE]
 [numthreads(4, 4, 4)]
-[playground::CALL_SIZE_OF("voxels")]
+[playground::CALL_INDIRECT("indirectBuffer", 16)]
 void worldgen(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
-    uint3 pos = dispatchThreadId;
+    int3 pos = dispatchThreadId;
+    pos.x = pos.x % CHUNK_SIZE;
+    let idx = dispatchThreadId.x / CHUNK_SIZE;
+    let chunk_location = chunkLoads[idx].xyz;
+    pos += CHUNK_SIZE * chunk_location;
+
     uint data = get_worldgen(pos);
 
-    voxels.Store(dispatchThreadId, data);
+    set_data(pos, data);
 }

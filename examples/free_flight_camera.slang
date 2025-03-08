@@ -9,9 +9,9 @@ WTexture2D<float4> outputTexture;
 Texture2D<float4> drawTexture;
 
 [playground::ZEROS(8)]
-RWStructuredBuffer<float> playerData;
+RWStructuredBuffer<float> gameData;
 
-[playground::REBIND_FOR_DRAW("playerData")]
+[playground::REBIND_FOR_DRAW("gameData")]
 StructuredBuffer<float> drawPlayerData;
 
 [playground::KEY_INPUT("W")]
@@ -54,7 +54,7 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
     uint2 imageSize;
     outputTexture.GetDimensions(imageSize.x, imageSize.y);
 
-    float3 cameraPos = float3(playerData[0], playerData[1], playerData[2]);
+    float3 cameraPos = float3(gameData[0], gameData[1], gameData[2]);
 
     float3 cameraDir = getCameraDirection(float2(imageSize));
     float3 up = float3(0.0, 1.0, 0.0);
@@ -65,9 +65,9 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
 
     cameraPos += mul(inputVector, inputTransform);
 
-    playerData[0] = cameraPos.x;
-    playerData[1] = cameraPos.y;
-    playerData[2] = cameraPos.z;
+    gameData[0] = cameraPos.x;
+    gameData[1] = cameraPos.y;
+    gameData[2] = cameraPos.z;
 }
 
 // Function to create a view matrix from camera position, target position, and up vector
@@ -108,7 +108,8 @@ float4x4 CreatePerspectiveMatrix(float fovY, float aspectRatio, float nearZ, flo
     return projectionMatrix;
 }
 
-float3 getCameraDirection(float2 imageSize) {
+float3 getCameraDirection(float2 imageSize)
+{
     float2 cameraControl = -3.141592 / 2.0 * (2.0 * getMousePosition().xy / imageSize - 1.0);
     return float3(sin(cameraControl.x) * cos(cameraControl.y), sin(cameraControl.y), cos(cameraControl.x) * cos(cameraControl.y));
 }
@@ -141,7 +142,8 @@ VOut vertexMain(uint vertexID: SV_VertexID)
 static const float3 lightPos = float3(2.0, 3.0, 4.0);
 
 [shader("fragment")]
-float4 fragmentMain(VOut input) : SV_Target
+float4 fragmentMain(VOut input)
+    : SV_Target
 {
     float4 albedo = float4(1.0);
     float3 diff = lightPos - input.originalPosition;
