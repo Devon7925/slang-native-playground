@@ -1624,7 +1624,7 @@ struct DebugPanel {
     last_frame_time: std::time::Instant,
     last_debug_frame_time: std::time::Instant,
     current_fps: f32,
-    fps_samples: Vec<f32>,
+    frame_time_samples: Vec<f32>,
 }
 
 pub struct AppState {
@@ -1748,7 +1748,7 @@ impl App {
             last_frame_time: std::time::Instant::now(),
             last_debug_frame_time: std::time::Instant::now(),
             current_fps: 0.0,
-            fps_samples: Vec::new(),
+            frame_time_samples: Vec::new(),
         };
 
         let debug_state = AppState::new(
@@ -1977,18 +1977,24 @@ impl ApplicationHandler for App {
             let now = std::time::Instant::now();
             let frame_time = now - debug_state.debug_panel.last_frame_time;
 
-            let instantaneous_fps = 1.0 / frame_time.as_secs_f32();
-            debug_state.debug_panel.fps_samples.push(instantaneous_fps);
+            debug_state
+                .debug_panel
+                .frame_time_samples
+                .push(frame_time.as_secs_f32());
 
             // Keep a rolling average of the last 60 frames
-            if debug_state.debug_panel.fps_samples.len() > 60 {
-                debug_state.debug_panel.fps_samples.remove(0);
+            if debug_state.debug_panel.frame_time_samples.len() > 60 {
+                debug_state.debug_panel.frame_time_samples.remove(0);
             }
 
             // Calculate average FPS
-            debug_state.debug_panel.current_fps =
-                debug_state.debug_panel.fps_samples.iter().sum::<f32>()
-                    / debug_state.debug_panel.fps_samples.len() as f32;
+            debug_state.debug_panel.current_fps = debug_state.debug_panel.frame_time_samples.len()
+                as f32
+                / debug_state
+                    .debug_panel
+                    .frame_time_samples
+                    .iter()
+                    .sum::<f32>();
 
             let debug_frame_time = now - debug_state.debug_panel.last_debug_frame_time;
 
