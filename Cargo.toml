@@ -23,7 +23,7 @@ serde = { version = "1.0.217", features = ["derive"] }
 ron = "0.8.1"
 
 [build-dependencies]
-slang = { git = "https://github.com/Devon7925/slang-rs.git" }
+slang = { git = "https://github.com/FloatyMonkey/slang-rs.git" }
 strum = "0.27"
 strum_macros = "0.27"
 wgpu = { version = "24.0.0", features = ["serde"] }
