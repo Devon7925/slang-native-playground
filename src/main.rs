@@ -126,14 +126,11 @@ fn get_resource_metadata(
         parameters,
     } in call_commands.iter()
     {
-        match parameters {
-            CallCommandParameters::Indirect(buffer_name, _) => {
-                result
-                    .entry(buffer_name.clone())
-                    .or_default()
-                    .push(ResourceMetadata::Indirect);
-            }
-            _ => {}
+        if let CallCommandParameters::Indirect(buffer_name, _) = parameters {
+            result
+                .entry(buffer_name.clone())
+                .or_default()
+                .push(ResourceMetadata::Indirect);
         }
     }
 
@@ -1225,91 +1222,89 @@ impl State {
         self.configure_surface();
 
         for (resource_name, command_data) in self.resource_commands.iter() {
-            match command_data {
-                ResourceCommandData::BlackScreen {
-                    format,
-                    width_scale,
-                    height_scale,
-                } => {
-                    let width = (width_scale * new_size.width as f32) as u32;
-                    let height = (height_scale * new_size.height as f32) as u32;
-                    let size = width * height;
-                    let element_size = format.block_copy_size(None).unwrap();
-                    let Some(binding_info) = self.bindings.get(resource_name) else {
-                        panic!("Resource {} is not defined in the bindings.", resource_name);
-                    };
+            let ResourceCommandData::BlackScreen {
+                format,
+                width_scale,
+                height_scale,
+            } = command_data
+            else {
+                continue;
+            };
+            let width = (width_scale * new_size.width as f32) as u32;
+            let height = (height_scale * new_size.height as f32) as u32;
+            let size = width * height;
+            let element_size = format.block_copy_size(None).unwrap();
+            let Some(binding_info) = self.bindings.get(resource_name) else {
+                panic!("Resource {} is not defined in the bindings.", resource_name);
+            };
 
-                    if !matches!(
-                        binding_info.ty,
-                        wgpu::BindingType::StorageTexture { .. }
-                            | wgpu::BindingType::Texture { .. }
-                    ) {
-                        panic!("Resource {} is an invalid type for BLACK", resource_name);
-                    }
-                    let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST
-                        | wgpu::TextureUsages::COPY_SRC
-                        | wgpu::TextureUsages::RENDER_ATTACHMENT;
-                    if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
-                        usage |= wgpu::TextureUsages::STORAGE_BINDING;
-                    }
-                    let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some(resource_name),
-                        dimension: wgpu::TextureDimension::D2,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        size: wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        format: *format,
-                        usage,
-                        view_formats: &[],
-                    });
-
-                    // Initialize the texture with zeros.
-                    let zeros = vec![0; (size * element_size) as usize];
-                    self.queue.write_texture(
-                        texture.as_image_copy(),
-                        &zeros,
-                        wgpu::TexelCopyBufferLayout {
-                            bytes_per_row: Some(width * element_size),
-                            offset: 0,
-                            rows_per_image: None,
-                        },
-                        wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                    let mut encoder = self.device.create_command_encoder(&Default::default());
-                    // copy old texture to new texture
-                    let Some(GPUResource::Texture(old_texture)) =
-                        self.allocated_resources.get(resource_name)
-                    else {
-                        panic!("Resource {} is not a Texture", resource_name);
-                    };
-                    encoder.copy_texture_to_texture(
-                        old_texture.as_image_copy(),
-                        texture.as_image_copy(),
-                        wgpu::Extent3d {
-                            width: width.min(old_texture.width()),
-                            height: height.min(old_texture.height()),
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                    self.queue.submit(Some(encoder.finish()));
-
-                    safe_set(
-                        &mut self.allocated_resources,
-                        resource_name.to_string(),
-                        GPUResource::Texture(texture),
-                    );
-                }
-                _ => {}
+            if !matches!(
+                binding_info.ty,
+                wgpu::BindingType::StorageTexture { .. } | wgpu::BindingType::Texture { .. }
+            ) {
+                panic!("Resource {} is an invalid type for BLACK", resource_name);
             }
+            let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::RENDER_ATTACHMENT;
+            if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
+                usage |= wgpu::TextureUsages::STORAGE_BINDING;
+            }
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(resource_name),
+                dimension: wgpu::TextureDimension::D2,
+                mip_level_count: 1,
+                sample_count: 1,
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                format: *format,
+                usage,
+                view_formats: &[],
+            });
+
+            // Initialize the texture with zeros.
+            let zeros = vec![0; (size * element_size) as usize];
+            self.queue.write_texture(
+                texture.as_image_copy(),
+                &zeros,
+                wgpu::TexelCopyBufferLayout {
+                    bytes_per_row: Some(width * element_size),
+                    offset: 0,
+                    rows_per_image: None,
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            // copy old texture to new texture
+            let Some(GPUResource::Texture(old_texture)) =
+                self.allocated_resources.get(resource_name)
+            else {
+                panic!("Resource {} is not a Texture", resource_name);
+            };
+            encoder.copy_texture_to_texture(
+                old_texture.as_image_copy(),
+                texture.as_image_copy(),
+                wgpu::Extent3d {
+                    width: width.min(old_texture.width()),
+                    height: height.min(old_texture.height()),
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.queue.submit(Some(encoder.finish()));
+
+            safe_set(
+                &mut self.allocated_resources,
+                resource_name.to_string(),
+                GPUResource::Texture(texture),
+            );
         }
         for (_, compute_pipeline) in self.compute_pipelines.iter_mut() {
             compute_pipeline.create_bind_group(&self.allocated_resources);
