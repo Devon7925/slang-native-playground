@@ -1191,17 +1191,17 @@ fn get_uniform_update_code(uniform_controllers: &[UniformController]) -> String 
             }
             UniformControllerType::KeyInput { ref key } => {
                 let keycode = match key.to_lowercase().as_str() {
-                    "enter" => "Key::Named(NamedKey::Enter)".to_string(),
-                    "space" => "Key::Named(NamedKey::Space)".to_string(),
-                    "shift" => "Key::Named(NamedKey::Shift)".to_string(),
-                    "ctrl" => "Key::Named(NamedKey::Control)".to_string(),
-                    "escape" => "Key::Named(NamedKey::Escape)".to_string(),
-                    "backspace" => "Key::Named(NamedKey::Backspace)".to_string(),
-                    "tab" => "Key::Named(NamedKey::Tab)".to_string(),
-                    "arrowup" => "Key::Named(NamedKey::ArrowUp)".to_string(),
-                    "arrowdown" => "Key::Named(NamedKey::ArrowDown)".to_string(),
-                    "arrowleft" => "Key::Named(NamedKey::ArrowLeft)".to_string(),
-                    "arrowright" => "Key::Named(NamedKey::ArrowRight)".to_string(),
+                    "enter" => "Key::Named(winit::keyboard::NamedKey::Enter)".to_string(),
+                    "space" => "Key::Named(winit::keyboard::NamedKey::Space)".to_string(),
+                    "shift" => "Key::Named(winit::keyboard::NamedKey::Shift)".to_string(),
+                    "ctrl" => "Key::Named(winit::keyboard::NamedKey::Control)".to_string(),
+                    "escape" => "Key::Named(winit::keyboard::NamedKey::Escape)".to_string(),
+                    "backspace" => "Key::Named(winit::keyboard::NamedKey::Backspace)".to_string(),
+                    "tab" => "Key::Named(winit::keyboard::NamedKey::Tab)".to_string(),
+                    "arrowup" => "Key::Named(winit::keyboard::NamedKey::ArrowUp)".to_string(),
+                    "arrowdown" => "Key::Named(winit::keyboard::NamedKey::ArrowDown)".to_string(),
+                    "arrowleft" => "Key::Named(winit::keyboard::NamedKey::ArrowLeft)".to_string(),
+                    "arrowright" => "Key::Named(winit::keyboard::NamedKey::ArrowRight)".to_string(),
                     k => format!("Key::Character(\"{}\".into())", k),
                 };
                 uniform_update_code += format!(

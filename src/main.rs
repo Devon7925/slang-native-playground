@@ -26,7 +26,7 @@ use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
+    keyboard::Key,
     platform::modifier_supplement::KeyEventExtModifierSupplement,
     window::{Window, WindowId},
 };
