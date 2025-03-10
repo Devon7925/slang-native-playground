@@ -791,11 +791,13 @@ impl SlangCompiler {
 
         let bindings = self.get_resource_bindings(&linked_program, &resource_commands);
 
+        let uniform_controllers = get_uniform_sliders(&resource_commands);
+
         return CompilationResult {
             out_code,
             entry_group_sizes,
             bindings,
-            uniform_controllers: get_uniform_sliders(&resource_commands),
+            uniform_controllers,
             resource_commands,
             call_commands,
             draw_commands,
@@ -937,12 +939,10 @@ fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {
             let count = resource_result_type.element_count().next_power_of_two() as u32;
             count * get_size(resource_result_type.element_type())
         }
-        TypeKind::Struct => {
-            resource_result_type
-                .fields()
-                .map(|f| get_size(f.ty()))
-                .fold(0, |a, f| (a + f + f - 1) / f * f)
-        }
+        TypeKind::Struct => resource_result_type
+            .fields()
+            .map(|f| get_size(f.ty()))
+            .fold(0, |a, f| (a + f + f - 1) / f * f),
         _ => panic!("Unimplemented type for get_size"),
     }
 }
@@ -1142,7 +1142,95 @@ fn get_uniform_sliders(
             _ => {}
         }
     }
-    return controllers;
+
+    controllers
+}
+
+fn get_uniform_update_code(uniform_controllers: &Vec<UniformController>) -> String {
+    let mut uniform_update_code = "{\n\
+        let uniform_borrow = self.uniform_components.borrow_mut();\n\
+    "
+    .to_string();
+    for (idx, controller) in uniform_controllers.iter().enumerate() {
+        uniform_update_code += format!("{{
+    let UniformController {{
+        buffer_offset,
+        controller: _controller,
+        ..
+    }} = uniform_borrow.get({idx}).unwrap();").as_str();
+        match controller.controller {
+            UniformControllerType::SLIDER { .. } => {
+                uniform_update_code += format!("
+    let UniformControllerType::SLIDER {{ value, .. }} = _controller else {{
+        panic!(\"Invalid generated code: Expected Slider got {{:?}}\", _controller);
+    }};
+    let slice = [*value];").as_str();
+            },
+            UniformControllerType::COLORPICK { .. } => {
+                uniform_update_code += format!("
+    let UniformControllerType::COLORPICK {{ value, .. }} = _controller else {{
+        panic!(\"Invalid generated code: Expected COLORPICK got {{:?}}\", _controller);
+    }};
+    let slice = [*value];").as_str();
+            },
+            UniformControllerType::MOUSEPOSITION => {
+                uniform_update_code += format!("
+    let mut slice = [0.0f32; 4];
+    slice[0] = self.mouse_state.last_mouse_down_pos.x as f32;
+    slice[1] = self.mouse_state.last_mouse_down_pos.y as f32;
+    slice[2] = self.mouse_state.last_mouse_clicked_pos.x as f32;
+    slice[3] = self.mouse_state.last_mouse_clicked_pos.y as f32;
+    if self.mouse_state.is_mouse_down {{
+        slice[2] = -slice[2];
+    }}
+    if self.mouse_state.mouse_clicked {{
+        slice[3] = -slice[3];
+    }}").as_str();
+            },
+            UniformControllerType::Time => {
+                uniform_update_code += format!("
+    let value = std::time::Instant::now()
+        .duration_since(self.launch_time)
+        .as_secs_f32();
+    let slice = [value];").as_str();
+            },
+            UniformControllerType::DeltaTime => {
+                uniform_update_code += format!("
+    let slice = [self.delta_time];").as_str();
+            },
+            UniformControllerType::KeyInput { ref key } => {
+                let keycode = match key.to_lowercase().as_str() {
+                    "enter" => "Key::Named(NamedKey::Enter)".to_string(),
+                    "space" => "Key::Named(NamedKey::Space)".to_string(),
+                    "shift" => "Key::Named(NamedKey::Shift)".to_string(),
+                    "ctrl" => "Key::Named(NamedKey::Control)".to_string(),
+                    "escape" => "Key::Named(NamedKey::Escape)".to_string(),
+                    "backspace" => "Key::Named(NamedKey::Backspace)".to_string(),
+                    "tab" => "Key::Named(NamedKey::Tab)".to_string(),
+                    "arrowup" => "Key::Named(NamedKey::ArrowUp)".to_string(),
+                    "arrowdown" => "Key::Named(NamedKey::ArrowDown)".to_string(),
+                    "arrowleft" => "Key::Named(NamedKey::ArrowLeft)".to_string(),
+                    "arrowright" => "Key::Named(NamedKey::ArrowRight)".to_string(),
+                    k => format!("Key::Character(\"{}\".into())", k),
+                };
+                uniform_update_code += format!("
+    let value = if self.keyboard_state.pressed_keys.contains(&{keycode}) {{
+        1.0f32
+    }} else {{
+        0.0f32
+    }};
+    let slice = [value];").as_str();
+            },
+        }
+        uniform_update_code += "
+    let uniform_data = bytemuck::cast_slice(&slice);
+    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
+}\n";
+
+    }
+    uniform_update_code += "\n}";
+
+    uniform_update_code
 }
 
 fn main() {
@@ -1159,6 +1247,10 @@ fn main() {
         ron::ser::to_string_pretty(&compilation, ron::ser::PrettyConfig::default()).unwrap();
     let mut file = File::create("compiled_shaders/compiled.ron").unwrap();
     file.write_all(serialized.as_bytes()).unwrap();
+
+    let uniform_update_code = get_uniform_update_code(&compilation.uniform_controllers);
+    let mut file = File::create("compiled_shaders/uniform_update_code.rs").unwrap();
+    file.write_all(uniform_update_code.as_bytes()).unwrap();
 
     let rand_float_compilation = compiler.compile(vec!["demos"], "rand_float.slang");
     let serialized =
