@@ -27,7 +27,9 @@ uniform float spacePressed;
 [playground::KEY_INPUT("Shift")]
 uniform float shiftPressed;
 
-[playground::SLIDER(0.5, 0.0, 2.0)]
+[playground::DELTA_TIME]
+uniform float delta_time;
+[playground::SLIDER(1.0, 0.0, 4.0)]
 uniform float speed;
 
 [playground::MODEL("static/teapot.obj")]
@@ -60,7 +62,7 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
     float3 up = float3(0.0, 1.0, 0.0);
     float3 left = normalize(cross(up, cameraDir));
 
-    float3 inputVector = speed * float3(wPressed - sPressed, aPressed - dPressed, spacePressed - shiftPressed);
+    float3 inputVector = speed * delta_time * float3(wPressed - sPressed, aPressed - dPressed, spacePressed - shiftPressed);
     float3x3 inputTransform = float3x3(cameraDir, left, up);
 
     cameraPos += mul(inputVector, inputTransform);
