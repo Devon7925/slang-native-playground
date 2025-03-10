@@ -17,7 +17,7 @@ use tokio::runtime;
 use url::{ParseError, Url};
 use wgpu::{BufferDescriptor, Extent3d, Features, SurfaceError};
 
-use std::{borrow::Cow, cell::RefCell, collections::HashMap, fs::read, sync::Arc};
+use std::{borrow::Cow, cell::RefCell, collections::HashMap, fs::read, rc::Rc, sync::Arc};
 
 use compute_pipeline::ComputePipeline;
 use std::collections::HashSet;
@@ -72,7 +72,7 @@ struct State {
     resource_commands: HashMap<String, ResourceCommandData>,
     call_commands: Vec<CallCommand>,
     draw_commands: Vec<DrawCommand>,
-    uniform_components: Arc<RefCell<Vec<UniformController>>>,
+    uniform_components: Rc<RefCell<Vec<UniformController>>>,
     uniform_size: u64,
     hashed_strings: HashMap<u32, String>,
     allocated_resources: HashMap<String, GPUResource>,
@@ -130,7 +130,7 @@ fn get_resource_metadata(
             CallCommandParameters::Indirect(buffer_name, _) => {
                 result
                     .entry(buffer_name.clone())
-                    .or_insert(vec![])
+                    .or_default()
                     .push(ResourceMetadata::Indirect);
             }
             _ => {}
@@ -168,11 +168,11 @@ async fn process_resource_commands(
     let mut unprocessed_resource_commands = resource_commands.clone();
     while !unprocessed_resource_commands.is_empty() {
         let resource_commands: HashMap<String, ResourceCommandData> =
-            unprocessed_resource_commands.drain().collect();
+            std::mem::take(&mut unprocessed_resource_commands);
 
         for (resource_name, command_data) in resource_commands {
             match command_data {
-                ResourceCommandData::ZEROS {
+                ResourceCommandData::Zeros {
                     count,
                     element_size,
                 } => {
@@ -258,7 +258,7 @@ async fn process_resource_commands(
                         GPUResource::Sampler(sampler),
                     );
                 }
-                ResourceCommandData::RAND(count) => {
+                ResourceCommandData::Rand(count) => {
                     let element_size = 4; // RAND is only valid for floats
                     let Some(binding_info) = resource_bindings.get(&resource_name) else {
                         panic!("Resource {} is not defined in the bindings.", resource_name);
@@ -326,7 +326,7 @@ async fn process_resource_commands(
                     let work_group_size: Vec<u32> = size
                         .iter()
                         .zip(block_size.map(|s| s as u32))
-                        .map(|(size, block_size)| (size + block_size - 1) / block_size)
+                        .map(|(size, block_size)| size.div_ceil(block_size))
                         .collect();
 
                     pass.dispatch_workgroups(
@@ -381,7 +381,7 @@ async fn process_resource_commands(
                             depth_or_array_layers: 1,
                         },
                         format,
-                        usage: usage,
+                        usage,
                         view_formats: &[],
                     });
 
@@ -443,7 +443,7 @@ async fn process_resource_commands(
                             depth_or_array_layers: size_z,
                         },
                         format,
-                        usage: usage,
+                        usage,
                         view_formats: &[],
                     });
 
@@ -536,7 +536,7 @@ async fn process_resource_commands(
                         GPUResource::Texture(texture),
                     );
                 }
-                ResourceCommandData::URL { url, format } => {
+                ResourceCommandData::Url { url, format } => {
                     // Load image from URL and wait for it to be ready.
                     let Some(binding_info) = resource_bindings.get(&resource_name) else {
                         panic!("Resource {} is not defined in the bindings.", resource_name);
@@ -693,7 +693,7 @@ async fn process_resource_commands(
                         )
                     }
                 }
-                ResourceCommandData::SLIDER {
+                ResourceCommandData::Slider {
                     default,
                     element_size,
                     offset,
@@ -711,7 +711,7 @@ async fn process_resource_commands(
                     };
                     queue.write_buffer(buffer, offset as u64, &buffer_default);
                 }
-                ResourceCommandData::COLORPICK {
+                ResourceCommandData::ColorPick {
                     default,
                     element_size,
                     offset,
@@ -726,9 +726,9 @@ async fn process_resource_commands(
                     } else {
                         panic!("Unsupported float size for color pick")
                     };
-                    queue.write_buffer(buffer, offset as u64, &buffer_default);
+                    queue.write_buffer(buffer, offset as u64, buffer_default);
                 }
-                ResourceCommandData::MOUSEPOSITION { offset } => {
+                ResourceCommandData::MousePosition { offset } => {
                     let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
                     else {
                         panic!("cannot get uniforms")
@@ -796,7 +796,7 @@ async fn process_resource_commands(
         })),
     );
 
-    return allocated_resources;
+    allocated_resources
 }
 
 enum FormatSpecifier {
@@ -852,17 +852,17 @@ fn parse_printf_format(format_string: String) -> Vec<FormatSpecifier> {
         ));
     }
 
-    return format_specifiers;
+    format_specifiers
 }
 
-fn format_printf_string(parsed_tokens: &Vec<FormatSpecifier>, data: &Vec<String>) -> String {
+fn format_printf_string(parsed_tokens: &[FormatSpecifier], data: &[String]) -> String {
     let mut data_index = 0;
 
     parsed_tokens
         .iter()
         .map(|token| match &token {
-            &FormatSpecifier::Text(value) => value.clone(),
-            &FormatSpecifier::Specifier {
+            FormatSpecifier::Text(value) => value.clone(),
+            FormatSpecifier::Specifier {
                 flags,
                 width,
                 precision,
@@ -880,15 +880,15 @@ fn format_printf_string(parsed_tokens: &Vec<FormatSpecifier>, data: &Vec<String>
 // Helper function to format each specifier
 fn format_specifier(
     value: String,
-    flags: &String,
+    flags: &str,
     width: &Option<usize>,
     precision: &Option<usize>,
-    specifier_type: &String,
+    specifier_type: &str,
 ) -> String {
     let mut formatted_value;
     let was_precision_specified = precision.is_some();
     let precision = precision.unwrap_or(6); //eww magic number
-    match specifier_type.as_str() {
+    match specifier_type {
         "d" | "i" => {
             // Integer (decimal)
             formatted_value = value.parse::<i32>().unwrap().to_string();
@@ -911,19 +911,19 @@ fn format_specifier(
         }
         "f" | "F" => {
             // Floating-point
-            formatted_value = format!("{:.1$}", value.parse::<f32>().unwrap(), precision as usize);
+            formatted_value = format!("{:.1$}", value.parse::<f32>().unwrap(), precision);
         }
         "e" => {
             // Scientific notation (lowercase)
-            formatted_value = format!("{:.1$e}", value.parse::<f32>().unwrap(), precision as usize);
+            formatted_value = format!("{:.1$e}", value.parse::<f32>().unwrap(), precision);
         }
         "E" => {
             // Scientific notation (uppercase)
-            formatted_value = format!("{:.1$E}", value.parse::<f32>().unwrap(), precision as usize);
+            formatted_value = format!("{:.1$E}", value.parse::<f32>().unwrap(), precision);
         }
         "g" | "G" => {
             // Shortest representation of floating-point
-            formatted_value = format!("{:.1$}", value.parse::<f32>().unwrap(), precision as usize);
+            formatted_value = format!("{:.1$}", value.parse::<f32>().unwrap(), precision);
         }
         "c" => {
             // Character
@@ -933,7 +933,7 @@ fn format_specifier(
             // String
             formatted_value = value.clone();
             if was_precision_specified {
-                formatted_value = formatted_value[0..precision as usize].to_string();
+                formatted_value = formatted_value[0..precision].to_string();
             }
         }
         "%" => {
@@ -973,7 +973,7 @@ fn format_specifier(
         }
     }
 
-    return formatted_value;
+    formatted_value
 }
 
 fn parse_printf_buffer(
@@ -999,7 +999,7 @@ fn parse_printf_buffer(
             1 => {
                 // format string
                 format_string = hashed_strings
-                    .get(&(printf_buffer_array[offset + 1] << 0))
+                    .get(&printf_buffer_array[offset + 1])
                     .unwrap()
                     .clone();
                 // low field
@@ -1008,7 +1008,7 @@ fn parse_printf_buffer(
                 // normal string
                 data_array.push(
                     hashed_strings
-                        .get(&(printf_buffer_array[offset + 1] << 0))
+                        .get(&printf_buffer_array[offset + 1])
                         .unwrap()
                         .clone(),
                 ); // low field
@@ -1047,7 +1047,7 @@ fn parse_printf_buffer(
         }
     }
 
-    if format_string != "" {
+    if !format_string.is_empty() {
         // If we are here, it means that the printf buffer is used up, and we are in the middle of processing
         // one printf string, so we are still going to format it, even though there could be some data missing, which
         // will be shown as 'undef'.
@@ -1057,7 +1057,7 @@ fn parse_printf_buffer(
         out_str_arry.push("Print buffer is out of boundary, some data is missing!!!".to_string());
     }
 
-    return out_str_arry;
+    out_str_arry
 }
 
 impl State {
@@ -1102,7 +1102,7 @@ impl State {
 
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rand float"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&rand_code.as_str())),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&rand_code)),
         });
 
         random_pipeline.set_thread_group_size(*rand_group_size);
@@ -1129,7 +1129,7 @@ impl State {
 
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&compilation.out_code.as_str())),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&compilation.out_code)),
         });
         for (shader_name, thread_group_size) in compilation.entry_group_sizes {
             let mut pipeline = ComputePipeline::new(device.clone());
@@ -1179,7 +1179,7 @@ impl State {
             resource_commands: compilation.resource_commands,
             call_commands: compilation.call_commands,
             draw_commands: compilation.draw_commands,
-            uniform_components: Arc::new(RefCell::new(compilation.uniform_controllers)),
+            uniform_components: Rc::new(RefCell::new(compilation.uniform_controllers)),
             uniform_size: compilation.uniform_size,
             hashed_strings: compilation.hashed_strings,
             allocated_resources,
@@ -1390,7 +1390,7 @@ impl State {
                     let work_group_size: Vec<u32> = size
                         .iter()
                         .zip(block_size.map(|s| s as u32))
-                        .map(|(size, block_size)| (size + block_size - 1) / block_size)
+                        .map(|(size, block_size)| size.div_ceil(block_size))
                         .collect();
 
                     pass.dispatch_workgroups(
@@ -1412,7 +1412,7 @@ impl State {
                     let work_group_size: Vec<u32> = size
                         .iter()
                         .zip(block_size.map(|s| s as u32))
-                        .map(|(size, block_size)| (size + block_size - 1) / block_size)
+                        .map(|(size, block_size)| size.div_ceil(block_size))
                         .collect();
 
                     pass.dispatch_workgroups(
@@ -1434,21 +1434,21 @@ impl State {
         }
 
         if self.compute_pipelines.contains_key("printMain") {
-            let Some(&GPUResource::Buffer(ref printf_buffer_read)) =
+            let Some(GPUResource::Buffer(printf_buffer_read)) =
                 self.allocated_resources.get("printfBufferRead")
             else {
                 panic!("printfBufferRead is incorrect type or doesn't exist");
             };
-            encoder.clear_buffer(&printf_buffer_read, 0, None);
-            let Some(&GPUResource::Buffer(ref g_printed_buffer)) =
+            encoder.clear_buffer(printf_buffer_read, 0, None);
+            let Some(GPUResource::Buffer(g_printed_buffer)) =
                 self.allocated_resources.get("g_printedBuffer")
             else {
                 panic!("g_printedBuffer is not a buffer");
             };
             encoder.copy_buffer_to_buffer(
-                &g_printed_buffer,
+                g_printed_buffer,
                 0,
-                &printf_buffer_read,
+                printf_buffer_read,
                 0,
                 g_printed_buffer.size(),
             );
@@ -1480,7 +1480,7 @@ impl State {
         self.queue.submit([encoder.finish()]);
 
         if self.compute_pipelines.contains_key("printMain") {
-            let Some(&GPUResource::Buffer(ref printf_buffer_read)) =
+            let Some(GPUResource::Buffer(printf_buffer_read)) =
                 self.allocated_resources.get("printfBufferRead")
             else {
                 panic!("printfBufferRead is incorrect type or doesn't exist");
@@ -1506,7 +1506,7 @@ impl State {
                 PRINTF_BUFFER_ELEMENT_SIZE,
             );
 
-            if format_print.len() != 0 {
+            if !format_print.is_empty() {
                 print!("Shader Output:\n{}\n", format_print.join(""));
             }
 
@@ -1544,7 +1544,7 @@ impl State {
 }
 
 struct DebugPanel {
-    uniform_controllers: Arc<RefCell<Vec<UniformController>>>,
+    uniform_controllers: Rc<RefCell<Vec<UniformController>>>,
     last_frame_time: std::time::Instant,
     last_debug_frame_time: std::time::Instant,
     current_fps: f32,
@@ -1648,7 +1648,7 @@ impl App {
     fn new() -> Self {
         let instance = egui_wgpu::wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         Self {
-            instance: instance,
+            instance,
             state: None,
             debug_app: None,
             debug_window: None,
@@ -1760,17 +1760,17 @@ impl App {
                     .iter_mut()
                 {
                     match controller {
-                        UniformControllerType::SLIDER {
+                        UniformControllerType::Slider {
                             value, min, max, ..
                         } => {
                             ui.label(name.as_str());
                             ui.add(Slider::new(value, *min..=*max));
                         }
-                        UniformControllerType::COLORPICK { value, .. } => {
+                        UniformControllerType::ColorPick { value, .. } => {
                             ui.label(name.as_str());
                             ui.color_edit_button_rgb(value);
                         }
-                        UniformControllerType::MOUSEPOSITION
+                        UniformControllerType::MousePosition
                         | UniformControllerType::Time
                         | UniformControllerType::DeltaTime
                         | UniformControllerType::KeyInput { .. } => {

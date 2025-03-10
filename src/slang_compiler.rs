@@ -5,11 +5,11 @@ use wgpu::BindGroupLayoutEntry;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ResourceCommandData {
-    ZEROS {
+    Zeros {
         count: u32,
         element_size: u32,
     },
-    RAND(u32),
+    Rand(u32),
     Black {
         width: u32,
         height: u32,
@@ -26,7 +26,7 @@ pub enum ResourceCommandData {
         height_scale: f32,
         format: wgpu::TextureFormat,
     },
-    URL {
+    Url {
         url: String,
         format: wgpu::TextureFormat,
     },
@@ -37,19 +37,19 @@ pub enum ResourceCommandData {
     RebindForDraw {
         original_resource: String,
     },
-    SLIDER {
+    Slider {
         default: f32,
         min: f32,
         max: f32,
         element_size: usize,
         offset: usize,
     },
-    COLORPICK {
+    ColorPick {
         default: [f32; 3],
         element_size: usize,
         offset: usize,
     },
-    MOUSEPOSITION {
+    MousePosition {
         offset: usize,
     },
     Time {
@@ -79,9 +79,9 @@ pub struct UniformController {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum UniformControllerType {
-    SLIDER { value: f32, min: f32, max: f32 },
-    COLORPICK { value: [f32; 3] },
-    MOUSEPOSITION,
+    Slider { value: f32, min: f32, max: f32 },
+    ColorPick { value: [f32; 3] },
+    MousePosition,
     Time,
     DeltaTime,
     KeyInput { key: String },

@@ -33,6 +33,12 @@ pub struct SlangCompiler {
     // compile_target_map: { name: string, value: number }[] | null,
 }
 
+impl Default for SlangCompiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SlangCompiler {
     pub fn new() -> Self {
         let global_slang_session = slang::GlobalSession::new().unwrap();
@@ -84,7 +90,7 @@ impl SlangCompiler {
     }
 
     fn is_runnable_entry_point(entry_point_name: &String) -> bool {
-        return ShaderType::iter().any(|st| st.get_entry_point_name() == entry_point_name);
+        ShaderType::iter().any(|st| st.get_entry_point_name() == entry_point_name)
     }
 
     fn get_binding_descriptor(
@@ -169,7 +175,7 @@ impl SlangCompiler {
             let mut visibility = wgpu::ShaderStages::NONE;
             if resource_commands
                 .get(&name)
-                .map(|c| is_available_in_compute(c))
+                .map(is_available_in_compute)
                 .unwrap_or(true)
             {
                 visibility |= wgpu::ShaderStages::COMPUTE;
@@ -202,20 +208,8 @@ impl SlangCompiler {
             );
         }
 
-        return resource_descriptors;
+        resource_descriptors
     }
-
-    // fn load_module(&self, slang_session: Session, module_name: string, source: string, component_type_list: Module[]) {
-    //     let module: Module | null = slang_session.load_module_from_source(source, module_name, "/" + module_name + ".slang");
-    //     if (!module) {
-    //         let error = self.slang_wasm_module.get_last_error();
-    //         console.error(error.type + " error: " + error.message);
-    //         self.diagnostics_msg += (error.type + " error: " + error.message);
-    //         return false;
-    //     }
-    //     component_type_list.push(module);
-    //     return true;
-    // }
 
     fn resource_commands_from_attributes(
         &self,
@@ -254,7 +248,7 @@ impl SlangCompiler {
                             parameter.variable().name().unwrap()
                         )
                     }
-                    Some(ResourceCommandData::ZEROS {
+                    Some(ResourceCommandData::Zeros {
                         count: count as u32,
                         element_size: get_size(parameter.ty().resource_result_type()),
                     })
@@ -291,7 +285,7 @@ impl SlangCompiler {
                             parameter.variable().name().unwrap()
                         )
                     }
-                    Some(ResourceCommandData::RAND(count as u32))
+                    Some(ResourceCommandData::Rand(count as u32))
                 } else if playground_attribute_name == "BLACK" {
                     if parameter.ty().kind() != TypeKind::Resource
                         || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
@@ -426,7 +420,7 @@ impl SlangCompiler {
                         .element_type_layout()
                         .binding_range_image_format(offset);
 
-                    Some(ResourceCommandData::URL {
+                    Some(ResourceCommandData::Url {
                         url: attribute
                             .argument_value_string(0)
                             .unwrap()
@@ -608,7 +602,7 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::SLIDER {
+                    Some(ResourceCommandData::Slider {
                         default: attribute.argument_value_float(0).unwrap(),
                         min: attribute.argument_value_float(1).unwrap(),
                         max: attribute.argument_value_float(2).unwrap(),
@@ -628,7 +622,7 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::COLORPICK {
+                    Some(ResourceCommandData::ColorPick {
                         default: [
                             attribute.argument_value_float(0).unwrap(),
                             attribute.argument_value_float(1).unwrap(),
@@ -651,7 +645,7 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::MOUSEPOSITION {
+                    Some(ResourceCommandData::MousePosition {
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else if playground_attribute_name == "KEY_INPUT" {
@@ -711,7 +705,7 @@ impl SlangCompiler {
             }
         }
 
-        return commands;
+        commands
     }
 
     pub fn compile(&self, search_paths: Vec<&str>, entry_module_name: &str) -> CompilationResult {
@@ -793,7 +787,7 @@ impl SlangCompiler {
 
         let uniform_controllers = get_uniform_sliders(&resource_commands);
 
-        return CompilationResult {
+        CompilationResult {
             out_code,
             entry_group_sizes,
             bindings,
@@ -803,7 +797,7 @@ impl SlangCompiler {
             draw_commands,
             hashed_strings,
             uniform_size: get_uniform_size(shader_reflection),
-        };
+        }
     }
 }
 
@@ -831,33 +825,27 @@ enum ModelField {
 }
 
 fn is_available_in_compute(resource_command: &ResourceCommandData) -> bool {
-    match resource_command {
-        ResourceCommandData::RebindForDraw { .. } => false,
-        _ => true,
-    }
+    !matches!(resource_command, ResourceCommandData::RebindForDraw { .. })
 }
 fn is_available_in_graphics(parameter: &VariableLayout) -> bool {
-    if parameter.ty().kind() == TypeKind::Resource {
-        if parameter.ty().resource_shape() == ResourceShape::SlangTexture2d
-            && parameter.ty().resource_access() == ResourceAccess::Read
-        {
-            return true;
-        } else if parameter.ty().resource_shape() == ResourceShape::SlangStructuredBuffer
-            && parameter.ty().resource_access() == ResourceAccess::Read
-        {
-            return true;
-        }
-        return false;
-    } else if parameter.ty().kind() == TypeKind::SamplerState {
-        return true;
-    } else if parameter.ty().kind() == TypeKind::ConstantBuffer {
-        return true;
+    match parameter.ty().kind() {
+        TypeKind::Resource => matches!(
+            (
+                parameter.ty().resource_shape(),
+                parameter.ty().resource_access(),
+            ),
+            (
+                ResourceShape::SlangTexture2d | ResourceShape::SlangStructuredBuffer,
+                ResourceAccess::Read,
+            )
+        ),
+        TypeKind::SamplerState | TypeKind::ConstantBuffer => true,
+        _ => false,
     }
-    false
 }
 
 fn round_up_to_nearest(size: u64, arg: u64) -> u64 {
-    (size + arg - 1) / arg * arg
+    size.div_ceil(arg) * arg
 }
 
 fn get_wgpu_format_from_slang_format(
@@ -942,7 +930,7 @@ fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {
         TypeKind::Struct => resource_result_type
             .fields()
             .map(|f| get_size(f.ty()))
-            .fold(0, |a, f| (a + f + f - 1) / f * f),
+            .fold(0, |a, f| (a + f).div_ceil(f) * f),
         _ => panic!("Unimplemented type for get_size"),
     }
 }
@@ -1044,7 +1032,7 @@ fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
         }
     }
 
-    return call_commands;
+    call_commands
 }
 
 fn parse_draw_commands(reflection: &Shader) -> Vec<DrawCommand> {
@@ -1072,7 +1060,7 @@ fn parse_draw_commands(reflection: &Shader) -> Vec<DrawCommand> {
         }
     }
 
-    return draw_commands;
+    draw_commands
 }
 
 fn get_uniform_size(shader_reflection: &Shader) -> u64 {
@@ -1088,7 +1076,7 @@ fn get_uniform_size(shader_reflection: &Shader) -> u64 {
         )
     }
 
-    return round_up_to_nearest(size, 16);
+    round_up_to_nearest(size, 16)
 }
 
 fn get_uniform_sliders(
@@ -1097,7 +1085,7 @@ fn get_uniform_sliders(
     let mut controllers: Vec<UniformController> = vec![];
     for (resource_name, command_data) in resource_commands.iter() {
         match command_data {
-            ResourceCommandData::SLIDER {
+            ResourceCommandData::Slider {
                 default,
                 min,
                 max,
@@ -1106,23 +1094,23 @@ fn get_uniform_sliders(
             } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::SLIDER {
+                controller: UniformControllerType::Slider {
                     value: *default,
                     min: *min,
                     max: *max,
                 },
             }),
-            ResourceCommandData::COLORPICK {
+            ResourceCommandData::ColorPick {
                 default, offset, ..
             } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::COLORPICK { value: *default },
+                controller: UniformControllerType::ColorPick { value: *default },
             }),
-            ResourceCommandData::MOUSEPOSITION { offset } => controllers.push(UniformController {
+            ResourceCommandData::MousePosition { offset } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::MOUSEPOSITION,
+                controller: UniformControllerType::MousePosition,
             }),
             ResourceCommandData::Time { offset } => controllers.push(UniformController {
                 name: resource_name.clone(),
@@ -1146,58 +1134,61 @@ fn get_uniform_sliders(
     controllers
 }
 
-fn get_uniform_update_code(uniform_controllers: &Vec<UniformController>) -> String {
+fn get_uniform_update_code(uniform_controllers: &[UniformController]) -> String {
     let mut uniform_update_code = "{\n\
         let uniform_borrow = self.uniform_components.borrow_mut();\n\
     "
     .to_string();
     for (idx, controller) in uniform_controllers.iter().enumerate() {
-        uniform_update_code += format!("{{
+        uniform_update_code += format!(
+            "{{
     let UniformController {{
         buffer_offset,
         controller: _controller,
         ..
-    }} = uniform_borrow.get({idx}).unwrap();").as_str();
+    }} = uniform_borrow.get({idx}).unwrap();"
+        )
+        .as_str();
         match controller.controller {
-            UniformControllerType::SLIDER { .. } => {
-                uniform_update_code += format!("
-    let UniformControllerType::SLIDER {{ value, .. }} = _controller else {{
-        panic!(\"Invalid generated code: Expected Slider got {{:?}}\", _controller);
+            UniformControllerType::Slider { .. } => {
+                uniform_update_code += "
+    let UniformControllerType::Slider { value, .. } = _controller else {
+        panic!(\"Invalid generated code: Expected Slider got {:?}\", _controller);
+    };
+    let slice = [*value];";
+            }
+            UniformControllerType::ColorPick { .. } => {
+                uniform_update_code += "
+    let UniformControllerType::ColorPick {{ value, .. }} = _controller else {{
+        panic!(\"Invalid generated code: Expected ColorPick got {:?}\", _controller);
     }};
-    let slice = [*value];").as_str();
-            },
-            UniformControllerType::COLORPICK { .. } => {
-                uniform_update_code += format!("
-    let UniformControllerType::COLORPICK {{ value, .. }} = _controller else {{
-        panic!(\"Invalid generated code: Expected COLORPICK got {{:?}}\", _controller);
-    }};
-    let slice = [*value];").as_str();
-            },
-            UniformControllerType::MOUSEPOSITION => {
-                uniform_update_code += format!("
+    let slice = [*value];";
+            }
+            UniformControllerType::MousePosition => {
+                uniform_update_code += "
     let mut slice = [0.0f32; 4];
     slice[0] = self.mouse_state.last_mouse_down_pos.x as f32;
     slice[1] = self.mouse_state.last_mouse_down_pos.y as f32;
     slice[2] = self.mouse_state.last_mouse_clicked_pos.x as f32;
     slice[3] = self.mouse_state.last_mouse_clicked_pos.y as f32;
-    if self.mouse_state.is_mouse_down {{
+    if self.mouse_state.is_mouse_down {
         slice[2] = -slice[2];
-    }}
-    if self.mouse_state.mouse_clicked {{
+    }
+    if self.mouse_state.mouse_clicked {
         slice[3] = -slice[3];
-    }}").as_str();
-            },
+    }";
+            }
             UniformControllerType::Time => {
-                uniform_update_code += format!("
+                uniform_update_code += "
     let value = std::time::Instant::now()
         .duration_since(self.launch_time)
         .as_secs_f32();
-    let slice = [value];").as_str();
-            },
+    let slice = [value];";
+            }
             UniformControllerType::DeltaTime => {
-                uniform_update_code += format!("
-    let slice = [self.delta_time];").as_str();
-            },
+                uniform_update_code += "
+    let slice = [self.delta_time];";
+            }
             UniformControllerType::KeyInput { ref key } => {
                 let keycode = match key.to_lowercase().as_str() {
                     "enter" => "Key::Named(NamedKey::Enter)".to_string(),
@@ -1213,20 +1204,22 @@ fn get_uniform_update_code(uniform_controllers: &Vec<UniformController>) -> Stri
                     "arrowright" => "Key::Named(NamedKey::ArrowRight)".to_string(),
                     k => format!("Key::Character(\"{}\".into())", k),
                 };
-                uniform_update_code += format!("
+                uniform_update_code += format!(
+                    "
     let value = if self.keyboard_state.pressed_keys.contains(&{keycode}) {{
         1.0f32
     }} else {{
         0.0f32
     }};
-    let slice = [value];").as_str();
-            },
+    let slice = [value];"
+                )
+                .as_str();
+            }
         }
         uniform_update_code += "
     let uniform_data = bytemuck::cast_slice(&slice);
     buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
 }\n";
-
     }
     uniform_update_code += "\n}";
 

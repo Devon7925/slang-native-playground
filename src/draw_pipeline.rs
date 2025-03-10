@@ -22,7 +22,7 @@ pub struct DrawPipeline {
 impl DrawPipeline {
     pub fn new(device: Arc<wgpu::Device>) -> Self {
         DrawPipeline {
-            device: device,
+            device,
             pipeline: None,
             pipeline_layout: None,
             bind_group: None,
@@ -38,7 +38,7 @@ impl DrawPipeline {
 
         let mut entries: Vec<wgpu::BindGroupLayoutEntry> = vec![];
         for (_, binding) in self.resource_bindings.as_ref().unwrap().iter() {
-            entries.push(binding.clone());
+            entries.push(*binding);
         }
         let bind_group_layout_descriptor = wgpu::BindGroupLayoutDescriptor {
             label: Some("compute pipeline bind group layout"),
@@ -191,10 +191,9 @@ impl DrawPipeline {
             let mut missing_entries: Vec<String> = vec![];
             // print out the names of the resources that aren't bound
             for (name, resource) in self.resource_bindings.as_ref().unwrap().iter() {
-                if entries
+                if !entries
                     .iter()
-                    .find(|entry| entry.binding == resource.binding)
-                    .is_none()
+                    .any(|entry| entry.binding == resource.binding)
                 {
                     missing_entries.push(name.clone());
                 }
