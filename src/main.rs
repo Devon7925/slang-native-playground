@@ -1,19 +1,17 @@
 mod compute_pipeline;
 mod draw_pipeline;
+#[cfg(not(target_arch = "wasm32"))]
 mod egui_tools;
 mod slang_compiler;
 
 use draw_pipeline::DrawPipeline;
-use egui::Slider;
-use egui_tools::EguiRenderer;
-use egui_wgpu::ScreenDescriptor;
 use rand::Rng;
 use regex::Regex;
 use slang_compiler::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
-    UniformController, UniformControllerType,
+    UniformController,
 };
-use wgpu::{BufferDescriptor, Extent3d, Features, SurfaceError};
+use wgpu::{BufferDescriptor, Extent3d, Features};
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, panic, rc::Rc, sync::Arc};
 
@@ -21,7 +19,7 @@ use compute_pipeline::ComputePipeline;
 use std::collections::HashSet;
 use winit::{
     application::ApplicationHandler,
-    dpi::{PhysicalPosition, PhysicalSize},
+    dpi::PhysicalPosition,
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, SmolStr},
@@ -1168,7 +1166,11 @@ impl State {
             width: self.size.width,
             height: self.size.height,
             desired_maximum_frame_latency: 2,
-            present_mode: if cfg!(target_arch = "wasm32") {wgpu::PresentMode::Fifo} else {wgpu::PresentMode::Immediate},
+            present_mode: if cfg!(target_arch = "wasm32") {
+                wgpu::PresentMode::Fifo
+            } else {
+                wgpu::PresentMode::Immediate
+            },
         };
         self.surface.configure(&self.device, &surface_config);
     }
@@ -1496,6 +1498,7 @@ impl State {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct DebugPanel {
     uniform_controllers: Rc<RefCell<Vec<UniformController>>>,
     last_frame_time: web_time::Instant,
@@ -1504,24 +1507,27 @@ struct DebugPanel {
     frame_time_samples: Vec<f32>,
 }
 
-pub struct AppState {
+#[cfg(not(target_arch = "wasm32"))]
+pub struct DebugAppState {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub surface_config: wgpu::SurfaceConfiguration,
     pub surface: wgpu::Surface<'static>,
     pub scale_factor: f32,
-    pub egui_renderer: EguiRenderer,
+    pub egui_renderer: egui_tools::EguiRenderer,
     debug_panel: DebugPanel,
+    window: Arc<Window>,
 }
 
-impl AppState {
+#[cfg(not(target_arch = "wasm32"))]
+impl DebugAppState {
     async fn new(
         instance: &wgpu::Instance,
         surface: wgpu::Surface<'static>,
-        window: &Window,
+        window: Arc<Window>,
         width: u32,
         height: u32,
-        debug_panel: DebugPanel,
+        #[cfg(not(target_arch = "wasm32"))] debug_panel: DebugPanel,
     ) -> Self {
         let power_pref = wgpu::PowerPreference::default();
         let adapter = instance
@@ -1568,7 +1574,8 @@ impl AppState {
 
         surface.configure(&device, &surface_config);
 
-        let egui_renderer = EguiRenderer::new(&device, surface_config.format, None, 1, window);
+        let egui_renderer =
+            egui_tools::EguiRenderer::new(&device, surface_config.format, None, 1, &window);
 
         let scale_factor = 1.0;
 
@@ -1579,7 +1586,9 @@ impl AppState {
             surface_config,
             egui_renderer,
             scale_factor,
+            #[cfg(not(target_arch = "wasm32"))]
             debug_panel,
+            window,
         }
     }
 
@@ -1588,42 +1597,47 @@ impl AppState {
         self.surface_config.height = height;
         self.surface.configure(&self.device, &self.surface_config);
     }
+    
+    fn handle_input(&mut self, event: &WindowEvent) {
+        self.egui_renderer.handle_input(&self.window, event);
+    }
 }
 
 #[derive(Default)]
 struct App {
-    instance: wgpu::Instance,
     state: Option<State>,
     #[cfg(target_arch = "wasm32")]
     state_receiver: Option<futures::channel::oneshot::Receiver<State>>,
-    debug_app: Option<AppState>,
-    debug_window: Option<Arc<Window>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_app: Option<DebugAppState>,
 }
 impl App {
     fn new() -> Self {
-        let instance = egui_wgpu::wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         Self {
-            instance,
             state: None,
             #[cfg(target_arch = "wasm32")]
             state_receiver: None,
+            #[cfg(not(target_arch = "wasm32"))]
             debug_app: None,
-            debug_window: None,
         }
     }
 
-    async fn set_window(&mut self, window: Window) {
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn set_debug_window(&mut self, window: Window) {
         let window = Arc::new(window);
         let initial_width = 1360;
         let initial_height = 768;
 
-        let _ = window.request_inner_size(PhysicalSize::new(initial_width, initial_height));
+        let _ =
+            window.request_inner_size(winit::dpi::PhysicalSize::new(initial_width, initial_height));
 
-        let surface = self
-            .instance
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+
+        let surface = instance
             .create_surface(window.clone())
             .expect("Failed to create surface!");
 
+        #[cfg(not(target_arch = "wasm32"))]
         let debug_panel = DebugPanel {
             uniform_controllers: self.state.as_ref().unwrap().uniform_components.clone(),
             last_frame_time: web_time::Instant::now(),
@@ -1632,20 +1646,21 @@ impl App {
             frame_time_samples: Vec::new(),
         };
 
-        let debug_state = AppState::new(
-            &self.instance,
+        let debug_state = DebugAppState::new(
+            &instance,
             surface,
-            &window,
+            window,
             initial_width,
             initial_width,
+            #[cfg(not(target_arch = "wasm32"))]
             debug_panel,
         )
         .await;
 
-        self.debug_window.get_or_insert(window);
         self.debug_app.get_or_insert(debug_state);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn handle_resized(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             self.debug_app
@@ -1655,29 +1670,27 @@ impl App {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn handle_redraw(&mut self) {
+        let state = self.debug_app.as_mut().unwrap();
+
         // Attempt to handle minimizing window
-        if let Some(window) = self.debug_window.as_ref() {
-            if let Some(min) = window.is_minimized() {
-                if min {
-                    println!("Window is minimized");
-                    return;
-                }
+        if let Some(min) = state.window.is_minimized() {
+            if min {
+                println!("Window is minimized");
+                return;
             }
         }
 
-        let state = self.debug_app.as_mut().unwrap();
-
-        let screen_descriptor = ScreenDescriptor {
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [state.surface_config.width, state.surface_config.height],
-            pixels_per_point: self.debug_window.as_ref().unwrap().scale_factor() as f32
-                * state.scale_factor,
+            pixels_per_point: state.window.scale_factor() as f32 * state.scale_factor,
         };
 
         let surface_texture = state.surface.get_current_texture();
 
         match surface_texture {
-            Err(SurfaceError::Outdated) => {
+            Err(wgpu::SurfaceError::Outdated) => {
                 // Ignoring outdated to allow resizing and minimization
                 println!("wgpu surface outdated");
                 return;
@@ -1699,7 +1712,7 @@ impl App {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        let window = self.debug_window.as_ref().unwrap();
+        let window = state.window.as_ref();
 
         {
             state.egui_renderer.begin_frame(window);
@@ -1716,12 +1729,13 @@ impl App {
                     .borrow_mut()
                     .iter_mut()
                 {
+                    use slang_compiler::UniformControllerType;
                     match controller {
                         UniformControllerType::Slider {
                             value, min, max, ..
                         } => {
                             ui.label(name.as_str());
-                            ui.add(Slider::new(value, *min..=*max));
+                            ui.add(egui::Slider::new(value, *min..=*max));
                         }
                         UniformControllerType::ColorPick { value, .. } => {
                             ui.label(name.as_str());
@@ -1755,8 +1769,7 @@ impl App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
-        let mut builder = Window::default_attributes()
-            .with_title("Slang Native Playground");
+        let mut builder = Window::default_attributes().with_title("Slang Native Playground");
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -1773,11 +1786,7 @@ impl ApplicationHandler for App {
             builder = builder.with_decorations(false).with_canvas(Some(canvas));
         }
         // Create window object
-        let window = Arc::new(
-            event_loop
-                .create_window(builder)
-                .unwrap(),
-        );
+        let window = Arc::new(event_loop.create_window(builder).unwrap());
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1804,12 +1813,12 @@ impl ApplicationHandler for App {
                     Window::default_attributes().with_title("Slang Native Playground Debug"),
                 )
                 .unwrap();
-            pollster::block_on(self.set_window(debug_window));
+            pollster::block_on(self.set_debug_window(debug_window));
             self.state.as_ref().unwrap().window.focus_window();
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         #[cfg(target_arch = "wasm32")]
         if self.state.is_none() {
             let mut renderer_received = false;
@@ -1825,17 +1834,18 @@ impl ApplicationHandler for App {
                 return;
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if self
-            .debug_window
+            .debug_app
             .as_ref()
-            .map(|w| w.id() == id)
+            .map(|w| w.window.id())
+            .map(|w_id| w_id == _id)
             .unwrap_or(false)
         {
             self.debug_app
                 .as_mut()
                 .unwrap()
-                .egui_renderer
-                .handle_input(self.debug_window.as_ref().unwrap(), &event);
+                .handle_input(&event);
 
             match event {
                 WindowEvent::CloseRequested => {
@@ -1856,7 +1866,11 @@ impl ApplicationHandler for App {
                 println!("The close button was pressed; stopping");
                 event_loop.exit();
             }
-            WindowEvent::RedrawRequested => {}
+            #[cfg(target_arch = "wasm32")]
+            WindowEvent::RedrawRequested => {
+                let state = self.state.as_mut().unwrap();
+                state.render();
+            }
             WindowEvent::Resized(size) => {
                 state.resize(size);
             }
@@ -1911,10 +1925,13 @@ impl ApplicationHandler for App {
             }
         }
         let state = self.state.as_mut().unwrap();
-        state.render();
-
-        // Only handle debug window if in debug mode
         #[cfg(not(target_arch = "wasm32"))]
+        state.render();
+        #[cfg(target_arch = "wasm32")]
+        state.window.request_redraw();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        // Only handle debug window if in debug mode
         if cfg!(debug_assertions) {
             let debug_state = self.debug_app.as_mut().unwrap();
 
