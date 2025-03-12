@@ -101,9 +101,9 @@ There are examples of use of the extra features in the `examples` folder. For si
 | `painting.slang` | A simple painting app demonstrating storage textures and indirect dispatch |
 | `voxels/` | A voxel rendering engine with simple falling sand physics |
 
-## Web Build (very experimental)
+## Web Build
 
-This app supports building for web. This is extremely unstable and WIP. To do so run:
+This app supports building for web. To do so run:
 
 ```bash
 cargo build --target wasm32-unknown-unknown
