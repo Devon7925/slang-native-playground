@@ -1208,14 +1208,14 @@ fn get_uniform_update_code(uniform_controllers: &[UniformController]) -> String 
         match controller.controller {
             UniformControllerType::Slider { .. } => {
                 uniform_update_code += "
-    let UniformControllerType::Slider { value, .. } = _controller else {
+    let slang_compiler::UniformControllerType::Slider { value, .. } = _controller else {
         panic!(\"Invalid generated code: Expected Slider got {:?}\", _controller);
     };
     let slice = [*value];";
             }
             UniformControllerType::ColorPick { .. } => {
                 uniform_update_code += "
-    let UniformControllerType::ColorPick {{ value, .. }} = _controller else {{
+    let slang_compiler::UniformControllerType::ColorPick {{ value, .. }} = _controller else {{
         panic!(\"Invalid generated code: Expected ColorPick got {:?}\", _controller);
     }};
     let slice = [*value];";
