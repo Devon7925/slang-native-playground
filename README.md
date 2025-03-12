@@ -101,3 +101,15 @@ There are examples of use of the extra features in the `examples` folder. For si
 | `painting.slang` | A simple painting app demonstrating storage textures and indirect dispatch |
 | `voxels/` | A voxel rendering engine with simple falling sand physics |
 
+## Web Build (very experimental)
+
+This app supports building for web. This is extremely unstable and WIP. To do so run:
+
+```bash
+cargo build --target wasm32-unknown-unknown
+wasm-bindgen --out-dir target/generated/ --web target/wasm32-unknown-unknown/debug/slang-native-playground.wasm 
+```
+
+The web build should then be accessible from `index.html`.
+
+

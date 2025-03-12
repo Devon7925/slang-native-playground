@@ -13,11 +13,9 @@ use slang_compiler::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
     UniformController, UniformControllerType,
 };
-use tokio::runtime;
-use url::{ParseError, Url};
 use wgpu::{BufferDescriptor, Extent3d, Features, SurfaceError};
 
-use std::{borrow::Cow, cell::RefCell, collections::HashMap, fs::read, rc::Rc, sync::Arc};
+use std::{borrow::Cow, cell::RefCell, collections::HashMap, panic, rc::Rc, sync::Arc};
 
 use compute_pipeline::ComputePipeline;
 use std::collections::HashSet;
@@ -26,10 +24,13 @@ use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::Key,
-    platform::modifier_supplement::KeyEventExtModifierSupplement,
+    keyboard::{Key, SmolStr},
     window::{Window, WindowId},
 };
+
+#[cfg(debug_assertions)]
+#[cfg(target_family = "wasm")]
+extern crate console_error_panic_hook;
 
 struct MouseState {
     last_mouse_clicked_pos: PhysicalPosition<f64>,
@@ -80,8 +81,8 @@ struct State {
     keyboard_state: KeyboardState,
     first_frame: bool,
     delta_time: f32,
-    last_frame_time: std::time::Instant,
-    launch_time: std::time::Instant,
+    last_frame_time: web_time::Instant,
+    launch_time: web_time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -533,7 +534,12 @@ async fn process_resource_commands(
                         GPUResource::Texture(texture),
                     );
                 }
-                ResourceCommandData::Url { url, format } => {
+                ResourceCommandData::Url {
+                    data,
+                    width,
+                    height,
+                    format,
+                } => {
                     // Load image from URL and wait for it to be ready.
                     let Some(binding_info) = resource_bindings.get(&resource_name) else {
                         panic!("Resource {} is not defined in the bindings.", resource_name);
@@ -544,54 +550,6 @@ async fn process_resource_commands(
                     if !matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
                         panic!("Resource ${resource_name} is not a texture.");
                     }
-                    let parsed_url = Url::parse(&url);
-                    let image_bytes = if let Err(ParseError::RelativeUrlWithoutBase) = parsed_url {
-                        read(url).unwrap()
-                    } else {
-                        reqwest::blocking::get(parsed_url.unwrap())
-                            .unwrap()
-                            .bytes()
-                            .unwrap()
-                            .to_vec()
-                    };
-                    let image = image::load_from_memory(&image_bytes).unwrap();
-                    let data = match format {
-                        wgpu::TextureFormat::Rgba8Unorm => image.to_rgba8().to_vec(),
-                        wgpu::TextureFormat::R8Unorm => image
-                            .to_rgba8()
-                            .to_vec()
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| (*i % 4) < 1)
-                            .map(|(_, c)| c)
-                            .cloned()
-                            .collect(),
-                        wgpu::TextureFormat::Rg8Unorm => image
-                            .to_rgba8()
-                            .to_vec()
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| (*i % 4) < 2)
-                            .map(|(_, c)| c)
-                            .cloned()
-                            .collect(),
-                        wgpu::TextureFormat::Rgba32Float => image
-                            .to_rgba32f()
-                            .to_vec()
-                            .iter()
-                            .flat_map(|c| c.to_le_bytes())
-                            .collect(),
-                        wgpu::TextureFormat::Rg32Float => image
-                            .to_rgba32f()
-                            .to_vec()
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| (*i % 4) < 2)
-                            .map(|(_, c)| c)
-                            .flat_map(|c| c.to_le_bytes())
-                            .collect(),
-                        f => panic!("URL unimplemented for image format {f:?}"),
-                    };
                     let texture = device.create_texture(&wgpu::TextureDescriptor {
                         label: None,
                         dimension: wgpu::TextureDimension::D2,
@@ -599,8 +557,8 @@ async fn process_resource_commands(
                         sample_count: 1,
                         view_formats: &[],
                         size: wgpu::Extent3d {
-                            width: image.width(),
-                            height: image.height(),
+                            width,
+                            height,
                             depth_or_array_layers: 1,
                         },
                         format,
@@ -612,13 +570,13 @@ async fn process_resource_commands(
                         texture.as_image_copy(),
                         &data,
                         wgpu::TexelCopyBufferLayout {
-                            bytes_per_row: Some(image.width() * element_size),
+                            bytes_per_row: Some(width * element_size),
                             offset: 0,
                             rows_per_image: None,
                         },
                         wgpu::Extent3d {
-                            width: image.width(),
-                            height: image.height(),
+                            width,
+                            height,
                             depth_or_array_layers: 1,
                         },
                     );
@@ -1190,8 +1148,8 @@ impl State {
             keyboard_state: KeyboardState::new(),
             first_frame: true,
             delta_time: 0.0,
-            last_frame_time: std::time::Instant::now(),
-            launch_time: std::time::Instant::now(),
+            last_frame_time: web_time::Instant::now(),
+            launch_time: web_time::Instant::now(),
         };
 
         // Configure surface for the first time
@@ -1210,7 +1168,7 @@ impl State {
             width: self.size.width,
             height: self.size.height,
             desired_maximum_frame_latency: 2,
-            present_mode: wgpu::PresentMode::Immediate,
+            present_mode: if cfg!(target_arch = "wasm32") {wgpu::PresentMode::Fifo} else {wgpu::PresentMode::Immediate},
         };
         self.surface.configure(&self.device, &surface_config);
     }
@@ -1337,7 +1295,7 @@ impl State {
         let mut buffer_data: Vec<u8> = vec![0; self.uniform_size as usize];
 
         // Calculate delta time
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         let frame_time = now - self.last_frame_time;
         self.delta_time = frame_time.as_secs_f32();
         self.last_frame_time = now;
@@ -1480,20 +1438,20 @@ impl State {
             else {
                 panic!("printfBufferRead is incorrect type or doesn't exist");
             };
-            let (sender, receiver) = futures_channel::oneshot::channel();
+            let (sender, receiver) = flume::bounded(1);
             printf_buffer_read
                 .slice(..)
-                .map_async(wgpu::MapMode::Read, |result| {
-                    let _ = sender.send(result);
-                });
+                .map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
             self.device.poll(wgpu::PollType::Wait).unwrap();
-            let rt = runtime::Builder::new_current_thread().build().unwrap();
-            rt.spawn_blocking(|| async {
-                receiver
-                    .await
-                    .expect("communication failed")
-                    .expect("buffer reading failed")
-            });
+            let future = async move { receiver.recv_async().await.unwrap().unwrap() };
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                pollster::block_on(future);
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                wasm_bindgen_futures::spawn_local(future);
+            }
 
             let format_print = parse_printf_buffer(
                 &self.hashed_strings,
@@ -1540,8 +1498,8 @@ impl State {
 
 struct DebugPanel {
     uniform_controllers: Rc<RefCell<Vec<UniformController>>>,
-    last_frame_time: std::time::Instant,
-    last_debug_frame_time: std::time::Instant,
+    last_frame_time: web_time::Instant,
+    last_debug_frame_time: web_time::Instant,
     current_fps: f32,
     frame_time_samples: Vec<f32>,
 }
@@ -1636,6 +1594,8 @@ impl AppState {
 struct App {
     instance: wgpu::Instance,
     state: Option<State>,
+    #[cfg(target_arch = "wasm32")]
+    state_receiver: Option<futures::channel::oneshot::Receiver<State>>,
     debug_app: Option<AppState>,
     debug_window: Option<Arc<Window>>,
 }
@@ -1645,6 +1605,8 @@ impl App {
         Self {
             instance,
             state: None,
+            #[cfg(target_arch = "wasm32")]
+            state_receiver: None,
             debug_app: None,
             debug_window: None,
         }
@@ -1664,8 +1626,8 @@ impl App {
 
         let debug_panel = DebugPanel {
             uniform_controllers: self.state.as_ref().unwrap().uniform_components.clone(),
-            last_frame_time: std::time::Instant::now(),
-            last_debug_frame_time: std::time::Instant::now(),
+            last_frame_time: web_time::Instant::now(),
+            last_debug_frame_time: web_time::Instant::now(),
             current_fps: 0.0,
             frame_time_samples: Vec::new(),
         };
@@ -1792,16 +1754,50 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[allow(unused_mut)]
+        let mut builder = Window::default_attributes()
+            .with_title("Slang Native Playground");
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::JsCast;
+            use winit::platform::web::WindowAttributesExtWebSys;
+            let canvas = web_sys::window()
+                .expect("error window")
+                .document()
+                .expect("error document")
+                .get_element_by_id("canvas")
+                .expect("could not find id canvas")
+                .dyn_into::<web_sys::HtmlCanvasElement>()
+                .expect("error HtmlCanvasElement");
+            builder = builder.with_decorations(false).with_canvas(Some(canvas));
+        }
         // Create window object
         let window = Arc::new(
             event_loop
-                .create_window(Window::default_attributes().with_title("Slang Native Playground"))
+                .create_window(builder)
                 .unwrap(),
         );
 
-        let state = pollster::block_on(State::new(window.clone()));
-        self.state = Some(state);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let state = pollster::block_on(State::new(window.clone()));
+            self.state = Some(state);
+        }
 
+        #[cfg(target_arch = "wasm32")]
+        {
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            self.state_receiver = Some(receiver);
+            wasm_bindgen_futures::spawn_local(async move {
+                let state = State::new(window.clone()).await;
+                if sender.send(state).is_err() {
+                    panic!("Failed to create and send renderer!");
+                }
+            });
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         if cfg!(debug_assertions) {
             let debug_window = event_loop
                 .create_window(
@@ -1809,12 +1805,26 @@ impl ApplicationHandler for App {
                 )
                 .unwrap();
             pollster::block_on(self.set_window(debug_window));
+            self.state.as_ref().unwrap().window.focus_window();
         }
-
-        self.state.as_ref().unwrap().window.focus_window();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        #[cfg(target_arch = "wasm32")]
+        if self.state.is_none() {
+            let mut renderer_received = false;
+            if let Some(receiver) = self.state_receiver.as_mut() {
+                if let Ok(Some(state)) = receiver.try_recv() {
+                    self.state = Some(state);
+                    renderer_received = true;
+                }
+            }
+            if renderer_received {
+                self.state_receiver = None;
+            } else {
+                return;
+            }
+        }
         if self
             .debug_window
             .as_ref()
@@ -1874,7 +1884,7 @@ impl ApplicationHandler for App {
                 device_id: _,
                 is_synthetic: _,
             } => {
-                let keycode = event.key_without_modifiers();
+                let keycode = remove_modifiers(event.logical_key);
                 match event.state {
                     ElementState::Pressed => state.key_pressed(keycode),
                     ElementState::Released => state.key_released(keycode),
@@ -1885,15 +1895,31 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(target_arch = "wasm32")]
+        if self.state.is_none() {
+            let mut renderer_received = false;
+            if let Some(receiver) = self.state_receiver.as_mut() {
+                if let Ok(Some(state)) = receiver.try_recv() {
+                    self.state = Some(state);
+                    renderer_received = true;
+                }
+            }
+            if renderer_received {
+                self.state_receiver = None;
+            } else {
+                return;
+            }
+        }
         let state = self.state.as_mut().unwrap();
         state.render();
 
         // Only handle debug window if in debug mode
+        #[cfg(not(target_arch = "wasm32"))]
         if cfg!(debug_assertions) {
             let debug_state = self.debug_app.as_mut().unwrap();
 
             // Calculate time since last frame
-            let now = std::time::Instant::now();
+            let now = web_time::Instant::now();
             let frame_time = now - debug_state.debug_panel.last_frame_time;
 
             debug_state
@@ -1932,7 +1958,18 @@ impl ApplicationHandler for App {
     }
 }
 
+fn remove_modifiers(key: Key<SmolStr>) -> Key<SmolStr> {
+    match key {
+        Key::Character(c) => Key::Character(c.to_lowercase().into()),
+        k => k,
+    }
+}
+
 fn main() {
+    #[cfg(debug_assertions)]
+    #[cfg(target_family = "wasm")]
+    panic::set_hook(Box::new(console_error_panic_hook::hook));
+
     // wgpu uses `log` for all of our logging, so we initialize a logger with the `env_logger` crate.
     //
     // To change the log level, set the `RUST_LOG` environment variable. See the `env_logger`

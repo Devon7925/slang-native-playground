@@ -9,18 +9,21 @@ pollster = "0.4.0"
 wgpu = { version = "24.0.0", features = ["serde"] }
 winit = "0.30.9"
 bytemuck = "1.21.0"
-reqwest = { version = "0.12.12", features = ["blocking"] }
-image = "0.25.5"
 rand = "0.9.0"
-url = "2.5.4"
-futures-channel = "0.3.31"
-tokio = "1.43.0"
-egui-winit = "0.31.0"
 egui-wgpu = "0.31.0"
 egui = "0.31.0"
 regex = "1.11.1"
 serde = { version = "1.0.217", features = ["derive"] }
 ron = "0.8.1"
+flume = "0.11.1"
+web-time = "1.1.0"
+futures = "0.3.31"
+
+[dependencies.egui-winit]
+version = "0.31.1"
+# Required for compiling to WASM
+default-features = false
+features = ["links", "wayland", "x11"]
 
 [build-dependencies]
 slang = { git = "https://github.com/FloatyMonkey/slang-rs.git" }
@@ -31,6 +34,16 @@ serde = { version = "1.0.217", features = ["derive"] }
 ron = "0.8.1"
 tobj = "4.0.3"
 bytemuck = "1.21.0"
+reqwest = { version = "0.12.12", features = ["blocking"] }
+image = "0.25.5"
+url = "2.5.4"
 
 [patch.crates-io]
-wgpu = { git = "https://github.com/gfx-rs/wgpu.git" }
+wgpu = { git = "https://github.com/gfx-rs/wgpu.git", rev = "d6ca412" }
+
+[target.wasm32-unknown-unknown.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+console_error_panic_hook = "0.1.7"
+wasm-bindgen = "0.2.100"
+web-sys = "0.3.77"
+wasm-bindgen-futures = "0.4.50"

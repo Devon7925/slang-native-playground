@@ -27,7 +27,9 @@ pub enum ResourceCommandData {
         format: wgpu::TextureFormat,
     },
     Url {
-        url: String,
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
         format: wgpu::TextureFormat,
     },
     Model {

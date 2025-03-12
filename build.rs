@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File},
+    fs::{self, File, read},
     io::Write,
 };
 
@@ -10,6 +10,7 @@ use slang::{
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use url::{ParseError, Url};
 
 include!("src/slang_compiler.rs");
 
@@ -420,16 +421,71 @@ impl SlangCompiler {
                         .element_type_layout()
                         .binding_range_image_format(offset);
 
-                    Some(ResourceCommandData::Url {
-                        url: attribute
-                            .argument_value_string(0)
+                    let format = get_wgpu_format_from_slang_format(
+                        format,
+                        parameter.ty().resource_result_type(),
+                    );
+
+                    let url = attribute
+                        .argument_value_string(0)
+                        .unwrap()
+                        .trim_matches('"')
+                        .to_string();
+
+                    let parsed_url = Url::parse(&url);
+                    let image_bytes = if let Err(ParseError::RelativeUrlWithoutBase) = parsed_url {
+                        read(url).unwrap()
+                    } else {
+                        reqwest::blocking::get(parsed_url.unwrap())
                             .unwrap()
-                            .trim_matches('"')
-                            .to_string(),
-                        format: get_wgpu_format_from_slang_format(
-                            format,
-                            parameter.ty().resource_result_type(),
-                        ),
+                            .bytes()
+                            .unwrap()
+                            .to_vec()
+                    };
+                    let image = image::load_from_memory(&image_bytes).unwrap();
+                    let data = match format {
+                        wgpu::TextureFormat::Rgba8Unorm => image.to_rgba8().to_vec(),
+                        wgpu::TextureFormat::R8Unorm => image
+                            .to_rgba8()
+                            .to_vec()
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| (*i % 4) < 1)
+                            .map(|(_, c)| c)
+                            .cloned()
+                            .collect(),
+                        wgpu::TextureFormat::Rg8Unorm => image
+                            .to_rgba8()
+                            .to_vec()
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| (*i % 4) < 2)
+                            .map(|(_, c)| c)
+                            .cloned()
+                            .collect(),
+                        wgpu::TextureFormat::Rgba32Float => image
+                            .to_rgba32f()
+                            .to_vec()
+                            .iter()
+                            .flat_map(|c| c.to_le_bytes())
+                            .collect(),
+                        wgpu::TextureFormat::Rg32Float => image
+                            .to_rgba32f()
+                            .to_vec()
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| (*i % 4) < 2)
+                            .map(|(_, c)| c)
+                            .flat_map(|c| c.to_le_bytes())
+                            .collect(),
+                        f => panic!("URL unimplemented for image format {f:?}"),
+                    };
+
+                    Some(ResourceCommandData::Url {
+                        data,
+                        width: image.width(),
+                        height: image.height(),
+                        format,
                     })
                 } else if playground_attribute_name == "MODEL" {
                     if parameter.ty().kind() != TypeKind::Resource
@@ -1180,7 +1236,7 @@ fn get_uniform_update_code(uniform_controllers: &[UniformController]) -> String 
             }
             UniformControllerType::Time => {
                 uniform_update_code += "
-    let value = std::time::Instant::now()
+    let value = web_time::Instant::now()
         .duration_since(self.launch_time)
         .as_secs_f32();
     let slice = [value];";
