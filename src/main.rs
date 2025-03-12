@@ -1825,6 +1825,8 @@ impl ApplicationHandler for App {
             if let Some(receiver) = self.state_receiver.as_mut() {
                 if let Ok(Some(state)) = receiver.try_recv() {
                     self.state = Some(state);
+                    let state = self.state.as_mut().unwrap();
+                    state.resize(state.window.inner_size());
                     renderer_received = true;
                 }
             }
