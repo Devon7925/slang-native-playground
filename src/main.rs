@@ -77,6 +77,7 @@ struct State {
     allocated_resources: HashMap<String, GPUResource>,
     mouse_state: MouseState,
     keyboard_state: KeyboardState,
+    print_receiver: Option<futures::channel::oneshot::Receiver<()>>,
     first_frame: bool,
     delta_time: f32,
     last_frame_time: web_time::Instant,
@@ -1144,6 +1145,7 @@ impl State {
                 is_mouse_down: false,
             },
             keyboard_state: KeyboardState::new(),
+            print_receiver: None,
             first_frame: true,
             delta_time: 0.0,
             last_frame_time: web_time::Instant::now(),
@@ -1275,6 +1277,40 @@ impl State {
     }
 
     fn render(&mut self) {
+        if let Some(receiver) = self.print_receiver.as_mut() {
+            let mut print_received = false;
+            if let Ok(Some(_)) = receiver.try_recv() {
+                let Some(GPUResource::Buffer(printf_buffer_read)) =
+                    self.allocated_resources.get("printfBufferRead")
+                else {
+                    panic!("printfBufferRead is incorrect type or doesn't exist");
+                };
+
+                let format_print = parse_printf_buffer(
+                    &self.hashed_strings,
+                    printf_buffer_read,
+                    PRINTF_BUFFER_ELEMENT_SIZE,
+                );
+    
+                if !format_print.is_empty() {
+                    let result = format!("Shader Output:\n{}\n", format_print.join(""));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    print!("{}", result);
+                    #[cfg(target_arch = "wasm32")]
+                    web_sys::console::log_1(&result.into())
+                }
+    
+                printf_buffer_read.unmap();
+                
+                print_received = true;
+            }
+            if print_received {
+                self.print_receiver = None;
+            } else {
+                return;
+            }
+        }
+
         // Create texture view
         let surface_texture = self
             .surface
@@ -1440,32 +1476,12 @@ impl State {
             else {
                 panic!("printfBufferRead is incorrect type or doesn't exist");
             };
-            let (sender, receiver) = flume::bounded(1);
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            self.print_receiver = Some(receiver);
             printf_buffer_read
                 .slice(..)
-                .map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
+                .map_async(wgpu::MapMode::Read, move |r| sender.send(r.unwrap()).unwrap());
             self.device.poll(wgpu::PollType::Wait).unwrap();
-            let future = async move { receiver.recv_async().await.unwrap().unwrap() };
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                pollster::block_on(future);
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                wasm_bindgen_futures::spawn_local(future);
-            }
-
-            let format_print = parse_printf_buffer(
-                &self.hashed_strings,
-                printf_buffer_read,
-                PRINTF_BUFFER_ELEMENT_SIZE,
-            );
-
-            if !format_print.is_empty() {
-                print!("Shader Output:\n{}\n", format_print.join(""));
-            }
-
-            printf_buffer_read.unmap();
         }
         surface_texture.present();
 
