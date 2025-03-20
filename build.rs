@@ -1,12 +1,12 @@
 use std::{
     fs::{self, File, read},
-    io::Write,
+    io::{Read, Write},
+    ops::Deref,
 };
 
 use slang::{
-    Downcast, GlobalSession, ParameterCategory, ResourceAccess, ResourceShape, ScalarType, Stage,
-    TypeKind,
-    reflection::{Shader, VariableLayout},
+    GlobalSession, ParameterCategory, ProgramLayout, ResourceAccess, ResourceShape, ScalarType,
+    Stage, TypeKind, reflection::VariableLayout,
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -40,6 +40,42 @@ impl Default for SlangCompiler {
     }
 }
 
+struct CustomFileSystem {
+    search_paths: Vec<String>,
+}
+impl CustomFileSystem {
+    fn new(search_paths: Vec<String>) -> Self {
+        Self { search_paths }
+    }
+}
+impl slang::FileSystem for CustomFileSystem {
+    fn load_file(&self, path: &str) -> slang::Result<slang::Blob> {
+        let mut path = path.to_string();
+        if path.ends_with(".slang-module") {
+            path = path.strip_suffix("-module").unwrap().to_string();
+        }
+        path = path.split(":").next().unwrap().to_string();
+        if !path.ends_with(".slang") {
+            path.push_str(".slang");
+        }
+        for search_path in self.search_paths.iter() {
+            let full_path = format!("{}/{}", search_path, path);
+            if fs::metadata(&full_path).is_ok() {
+                let mut file = File::open(&full_path)
+                    .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+
+                let mut contents = Vec::new();
+                file.read_to_end(&mut contents)
+                    .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+
+                return Ok(slang::Blob::from(contents));
+            }
+        }
+
+        Err(slang::Error::Blob(slang::Blob::from("File not found")))
+    }
+}
+
 impl SlangCompiler {
     pub fn new() -> Self {
         let global_slang_session = slang::GlobalSession::new().unwrap();
@@ -59,10 +95,10 @@ impl SlangCompiler {
         for imported_file in user_module.dependency_file_paths() {
             let module = slang_session.load_module(imported_file).unwrap();
 
-            component_list.push(module.downcast().clone());
+            component_list.push(module.deref().clone());
 
             for entry_point in module.entry_points() {
-                component_list.push(entry_point.downcast().clone());
+                component_list.push(entry_point.deref().clone());
             }
         }
 
@@ -81,10 +117,10 @@ impl SlangCompiler {
                     .load_module(format!("{}.slang", st).as_str())
                     .unwrap();
 
-                component_list.push(module.downcast().clone());
+                component_list.push(module.deref().clone());
 
                 for entry_point in module.entry_points() {
-                    component_list.push(entry_point.downcast().clone());
+                    component_list.push(entry_point.deref().clone());
                 }
             }
         }
@@ -97,7 +133,7 @@ impl SlangCompiler {
     fn get_binding_descriptor(
         &self,
         index: u32,
-        program_reflection: &Shader,
+        program_reflection: &ProgramLayout,
         parameter: &slang::reflection::VariableLayout,
     ) -> Option<wgpu::BindingType> {
         let global_layout = program_reflection.global_params_type_layout();
@@ -115,7 +151,7 @@ impl SlangCompiler {
                     .element_type_layout()
                     .binding_range_image_format(index as i64 - 1);
                 Some(wgpu::BindingType::StorageTexture {
-                    access: match parameter.ty().resource_access() {
+                    access: match parameter.ty().unwrap().resource_access() {
                         slang::ResourceAccess::Read => wgpu::StorageTextureAccess::ReadOnly,
                         slang::ResourceAccess::ReadWrite => wgpu::StorageTextureAccess::ReadWrite,
                         slang::ResourceAccess::Write => wgpu::StorageTextureAccess::WriteOnly,
@@ -123,7 +159,7 @@ impl SlangCompiler {
                     },
                     format: get_wgpu_format_from_slang_format(
                         format,
-                        parameter.ty().resource_result_type(),
+                        parameter.ty().unwrap().resource_result_type(),
                     ),
                     view_dimension: parameter_texture_view_dimension(parameter),
                 })
@@ -165,14 +201,14 @@ impl SlangCompiler {
         let mut resource_descriptors = HashMap::new();
         let mut uniform_input = false;
         for parameter in reflection.parameters() {
-            let name = parameter.variable().name().unwrap().to_string();
+            let name = parameter.variable().unwrap().name().to_string();
             if parameter.category() == ParameterCategory::Uniform {
                 uniform_input = true;
                 continue;
             }
 
             let resource_info =
-                self.get_binding_descriptor(parameter.binding_index(), reflection, parameter);
+                self.get_binding_descriptor(parameter.binding_index(), &reflection, parameter);
             let mut visibility = wgpu::ShaderStages::NONE;
             if resource_commands
                 .get(&name)
@@ -214,7 +250,7 @@ impl SlangCompiler {
 
     fn resource_commands_from_attributes(
         &self,
-        shader_reflection: &Shader,
+        shader_reflection: &ProgramLayout,
     ) -> HashMap<String, ResourceCommandData> {
         let mut commands: HashMap<String, ResourceCommandData> = HashMap::new();
 
@@ -228,72 +264,74 @@ impl SlangCompiler {
                 .global_params_type_layout()
                 .element_type_layout()
                 .field_binding_range_offset(parameter_idx as i64);
-            for attribute in parameter.variable().user_attributes() {
+            for attribute in parameter.variable().unwrap().user_attributes() {
                 let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
                 else {
                     continue;
                 };
                 let command = if playground_attribute_name == "ZEROS" {
-                    if parameter.ty().kind() != TypeKind::Resource
-                        || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
+                    if parameter.ty().unwrap().kind() != TypeKind::Resource
+                        || parameter.ty().unwrap().resource_shape()
+                            != ResourceShape::SlangStructuredBuffer
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
                     let count = attribute.argument_value_int(0).unwrap();
                     if count < 0 {
                         panic!(
                             "{playground_attribute_name} count for {} cannot have negative size",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
                     Some(ResourceCommandData::Zeros {
                         count: count as u32,
-                        element_size: get_size(parameter.ty().resource_result_type()),
+                        element_size: get_size(parameter.ty().unwrap().resource_result_type()),
                     })
                 } else if playground_attribute_name == "SAMPLER" {
-                    if parameter.ty().kind() != TypeKind::SamplerState {
+                    if parameter.ty().unwrap().kind() != TypeKind::SamplerState {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports samplers",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
                     Some(ResourceCommandData::Sampler)
                 } else if playground_attribute_name == "RAND" {
-                    if parameter.ty().kind() != TypeKind::Resource
-                        || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
+                    if parameter.ty().unwrap().kind() != TypeKind::Resource
+                        || parameter.ty().unwrap().resource_shape()
+                            != ResourceShape::SlangStructuredBuffer
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
-                    if parameter.ty().resource_result_type().kind() != TypeKind::Scalar
-                        || parameter.ty().resource_result_type().scalar_type()
+                    if parameter.ty().unwrap().resource_result_type().kind() != TypeKind::Scalar
+                        || parameter.ty().unwrap().resource_result_type().scalar_type()
                             != ScalarType::Float32
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports float buffers",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
                     let count = attribute.argument_value_int(0).unwrap();
                     if count < 0 {
                         panic!(
                             "{playground_attribute_name} count for {} cannot have negative size",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
                     Some(ResourceCommandData::Rand(count as u32))
                 } else if playground_attribute_name == "BLACK" {
-                    if parameter.ty().kind() != TypeKind::Resource
-                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
+                    if parameter.ty().unwrap().kind() != TypeKind::Resource
+                        || parameter.ty().unwrap().resource_shape() != ResourceShape::SlangTexture2d
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports 2D textures",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -302,13 +340,13 @@ impl SlangCompiler {
                     if width < 0 {
                         panic!(
                             "{playground_attribute_name} width for {} cannot have negative size",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
                     if height < 0 {
                         panic!(
                             "{playground_attribute_name} height for {} cannot have negative size",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -322,16 +360,16 @@ impl SlangCompiler {
                         height: height as u32,
                         format: get_wgpu_format_from_slang_format(
                             format,
-                            parameter.ty().resource_result_type(),
+                            parameter.ty().unwrap().resource_result_type(),
                         ),
                     })
                 } else if playground_attribute_name == "BLACK_3D" {
-                    if parameter.ty().kind() != TypeKind::Resource
-                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture3d
+                    if parameter.ty().unwrap().kind() != TypeKind::Resource
+                        || parameter.ty().unwrap().resource_shape() != ResourceShape::SlangTexture3d
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports 3D textures",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -344,7 +382,7 @@ impl SlangCompiler {
                                 panic!(
                                     "{playground_attribute_name} {} for {} cannot have negative size",
                                     stringify!($id),
-                                    parameter.variable().name().unwrap()
+                                    parameter.variable().unwrap().name()
                                 )
                             }
                         };
@@ -365,16 +403,16 @@ impl SlangCompiler {
                         size_z: size_z as u32,
                         format: get_wgpu_format_from_slang_format(
                             format,
-                            parameter.ty().resource_result_type(),
+                            parameter.ty().unwrap().resource_result_type(),
                         ),
                     })
                 } else if playground_attribute_name == "BLACK_SCREEN" {
-                    if parameter.ty().kind() != TypeKind::Resource
-                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
+                    if parameter.ty().unwrap().kind() != TypeKind::Resource
+                        || parameter.ty().unwrap().resource_shape() != ResourceShape::SlangTexture2d
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports 2D textures",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -383,13 +421,13 @@ impl SlangCompiler {
                     if width_scale < 0.0 {
                         panic!(
                             "{playground_attribute_name} width for {} cannot have negative size",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
                     if height_scale < 0.0 {
                         panic!(
                             "{playground_attribute_name} height for {} cannot have negative size",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -403,16 +441,16 @@ impl SlangCompiler {
                         height_scale,
                         format: get_wgpu_format_from_slang_format(
                             format,
-                            parameter.ty().resource_result_type(),
+                            parameter.ty().unwrap().resource_result_type(),
                         ),
                     })
                 } else if playground_attribute_name == "URL" {
-                    if parameter.ty().kind() != TypeKind::Resource
-                        || parameter.ty().resource_shape() != ResourceShape::SlangTexture2d
+                    if parameter.ty().unwrap().kind() != TypeKind::Resource
+                        || parameter.ty().unwrap().resource_shape() != ResourceShape::SlangTexture2d
                     {
                         panic!(
                             "URL attribute cannot be applied to {}, it only supports 2D textures",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -423,7 +461,7 @@ impl SlangCompiler {
 
                     let format = get_wgpu_format_from_slang_format(
                         format,
-                        parameter.ty().resource_result_type(),
+                        parameter.ty().unwrap().resource_result_type(),
                     );
 
                     let url = attribute
@@ -488,23 +526,24 @@ impl SlangCompiler {
                         format,
                     })
                 } else if playground_attribute_name == "MODEL" {
-                    if parameter.ty().kind() != TypeKind::Resource
-                        || parameter.ty().resource_shape() != ResourceShape::SlangStructuredBuffer
+                    if parameter.ty().unwrap().kind() != TypeKind::Resource
+                        || parameter.ty().unwrap().resource_shape()
+                            != ResourceShape::SlangStructuredBuffer
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
-                    if parameter.ty().element_type().kind() != TypeKind::Struct {
+                    if parameter.ty().unwrap().element_type().kind() != TypeKind::Struct {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, inner type must be struct",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
                     let mut field_types = vec![];
-                    for field in parameter.ty().element_type().fields() {
-                        match field.name().unwrap() {
+                    for field in parameter.ty().unwrap().element_type().fields() {
+                        match field.name() {
                             "position" => {
                                 if field.ty().kind() != TypeKind::Vector
                                     || field.ty().element_count() != 3
@@ -514,7 +553,7 @@ impl SlangCompiler {
                                 {
                                     panic!(
                                         "Unsupported type for position field of MODEL struct for {}",
-                                        parameter.variable().name().unwrap()
+                                        parameter.variable().unwrap().name()
                                     )
                                 }
                                 field_types.push(ModelField::Position)
@@ -528,7 +567,7 @@ impl SlangCompiler {
                                 {
                                     panic!(
                                         "Unsupported type for normal field of MODEL struct for {}",
-                                        parameter.variable().name().unwrap()
+                                        parameter.variable().unwrap().name()
                                     )
                                 }
                                 field_types.push(ModelField::Normal)
@@ -542,14 +581,14 @@ impl SlangCompiler {
                                 {
                                     panic!(
                                         "Unsupported type for normal field of MODEL struct for {}",
-                                        parameter.variable().name().unwrap()
+                                        parameter.variable().unwrap().name()
                                     )
                                 }
                                 field_types.push(ModelField::TexCoords)
                             }
                             field_name => panic!(
                                 "{field_name} is not a valid field for MODEL attribute on {}, valid fields are: position, normal, uv",
-                                parameter.variable().name().unwrap()
+                                parameter.variable().unwrap().name()
                             ),
                         }
                     }
@@ -629,14 +668,15 @@ impl SlangCompiler {
 
                     Some(ResourceCommandData::Model { data })
                 } else if playground_attribute_name == "REBIND_FOR_DRAW" {
-                    if parameter.ty().kind() != TypeKind::Resource
-                        || !(parameter.ty().resource_shape() == ResourceShape::SlangTexture2d
-                            || parameter.ty().resource_shape()
+                    if parameter.ty().unwrap().kind() != TypeKind::Resource
+                        || !(parameter.ty().unwrap().resource_shape()
+                            == ResourceShape::SlangTexture2d
+                            || parameter.ty().unwrap().resource_shape()
                                 == ResourceShape::SlangStructuredBuffer)
                     {
                         panic!(
                             "REBIND_FOR_DRAW attribute cannot be applied to {}, it only supports 2D textures and structured buffers",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -648,13 +688,13 @@ impl SlangCompiler {
                             .to_string(),
                     })
                 } else if playground_attribute_name == "SLIDER" {
-                    if parameter.ty().kind() != TypeKind::Scalar
-                        || parameter.ty().scalar_type() != ScalarType::Float32
+                    if parameter.ty().unwrap().kind() != TypeKind::Scalar
+                        || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
                         || parameter.category_by_index(0) != ParameterCategory::Uniform
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -666,15 +706,16 @@ impl SlangCompiler {
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else if playground_attribute_name == "COLOR_PICK" {
-                    if parameter.ty().kind() != TypeKind::Vector
-                        || parameter.ty().element_count() <= 2
-                        || parameter.ty().element_type().kind() != TypeKind::Scalar
-                        || parameter.ty().element_type().scalar_type() != ScalarType::Float32
+                    if parameter.ty().unwrap().kind() != TypeKind::Vector
+                        || parameter.ty().unwrap().element_count() <= 2
+                        || parameter.ty().unwrap().element_type().kind() != TypeKind::Scalar
+                        || parameter.ty().unwrap().element_type().scalar_type()
+                            != ScalarType::Float32
                         || parameter.category_by_index(0) != ParameterCategory::Uniform
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports float vectors",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -685,19 +726,20 @@ impl SlangCompiler {
                             attribute.argument_value_float(2).unwrap(),
                         ],
                         element_size: parameter.type_layout().size(ParameterCategory::Uniform)
-                            / parameter.ty().element_count(),
+                            / parameter.ty().unwrap().element_count(),
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else if playground_attribute_name == "MOUSEPOSITION" {
-                    if parameter.ty().kind() != TypeKind::Vector
-                        || parameter.ty().element_count() <= 3
-                        || parameter.ty().element_type().kind() != TypeKind::Scalar
-                        || parameter.ty().element_type().scalar_type() != ScalarType::Float32
+                    if parameter.ty().unwrap().kind() != TypeKind::Vector
+                        || parameter.ty().unwrap().element_count() <= 3
+                        || parameter.ty().unwrap().element_type().kind() != TypeKind::Scalar
+                        || parameter.ty().unwrap().element_type().scalar_type()
+                            != ScalarType::Float32
                         || parameter.category_by_index(0) != ParameterCategory::Uniform
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports float vectors",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -705,13 +747,13 @@ impl SlangCompiler {
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else if playground_attribute_name == "KEY_INPUT" {
-                    if parameter.ty().kind() != TypeKind::Scalar
-                        || parameter.ty().scalar_type() != ScalarType::Float32
+                    if parameter.ty().unwrap().kind() != TypeKind::Scalar
+                        || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
                         || parameter.category_by_index(0) != ParameterCategory::Uniform
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -724,13 +766,13 @@ impl SlangCompiler {
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else if playground_attribute_name == "TIME" {
-                    if parameter.ty().kind() != TypeKind::Scalar
-                        || parameter.ty().scalar_type() != ScalarType::Float32
+                    if parameter.ty().unwrap().kind() != TypeKind::Scalar
+                        || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
                         || parameter.category_by_index(0) != ParameterCategory::Uniform
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -738,13 +780,13 @@ impl SlangCompiler {
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
                 } else if playground_attribute_name == "DELTA_TIME" {
-                    if parameter.ty().kind() != TypeKind::Scalar
-                        || parameter.ty().scalar_type() != ScalarType::Float32
+                    if parameter.ty().unwrap().kind() != TypeKind::Scalar
+                        || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
                         || parameter.category_by_index(0) != ParameterCategory::Uniform
                     {
                         panic!(
                             "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
-                            parameter.variable().name().unwrap()
+                            parameter.variable().unwrap().name()
                         )
                     }
 
@@ -756,7 +798,7 @@ impl SlangCompiler {
                 };
 
                 if let Some(command) = command {
-                    commands.insert(parameter.variable().name().unwrap().to_string(), command);
+                    commands.insert(parameter.variable().unwrap().name().to_string(), command);
                 }
             }
         }
@@ -765,6 +807,7 @@ impl SlangCompiler {
     }
 
     pub fn compile(&self, search_paths: Vec<&str>, entry_module_name: &str) -> CompilationResult {
+        let original_search_paths = search_paths.clone();
         let search_paths = search_paths
             .into_iter()
             .map(std::ffi::CString::new)
@@ -781,14 +824,22 @@ impl SlangCompiler {
             .format(slang::CompileTarget::Wgsl)
             .profile(self.global_slang_session.find_profile("spirv_1_6"));
 
+        let custom_file_system = CustomFileSystem::new(
+            original_search_paths
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        );
+
         let targets = [target_desc];
 
         let session_desc = slang::SessionDesc::default()
             .targets(&targets)
             .search_paths(&search_paths)
-            .options(&session_options);
+            .options(&session_options)
+            .file_system(custom_file_system);
 
-        let Some(slang_session) = self.global_slang_session.create_session(&session_desc) else {
+        let Ok(slang_session) = self.global_slang_session.create_session(&session_desc) else {
             // let error = self.slang_wasm_module.get_last_error();
             // console.error(error.type + " error: " + error.message);
             // self.diagnostics_msg += (error.type + " error: " + error.message);
@@ -822,7 +873,7 @@ impl SlangCompiler {
         let linked_program = program.link().unwrap();
 
         let shader_reflection = linked_program.layout(0).unwrap();
-        let hashed_strings = load_strings(shader_reflection);
+        let hashed_strings = load_strings(&shader_reflection);
         let out_code = linked_program.target_code(0).unwrap().as_slice().to_vec();
         let out_code = String::from_utf8(out_code).unwrap();
 
@@ -835,9 +886,9 @@ impl SlangCompiler {
             }
         }
 
-        let resource_commands = self.resource_commands_from_attributes(shader_reflection);
-        let call_commands = parse_call_commands(shader_reflection);
-        let draw_commands = parse_draw_commands(shader_reflection);
+        let resource_commands = self.resource_commands_from_attributes(&shader_reflection);
+        let call_commands = parse_call_commands(&shader_reflection);
+        let draw_commands = parse_draw_commands(&shader_reflection);
 
         let bindings = self.get_resource_bindings(&linked_program, &resource_commands);
 
@@ -852,13 +903,13 @@ impl SlangCompiler {
             call_commands,
             draw_commands,
             hashed_strings,
-            uniform_size: get_uniform_size(shader_reflection),
+            uniform_size: get_uniform_size(&shader_reflection),
         }
     }
 }
 
 fn parameter_texture_view_dimension(parameter: &VariableLayout) -> wgpu::TextureViewDimension {
-    match parameter.ty().resource_shape() {
+    match parameter.ty().unwrap().resource_shape() {
         ResourceShape::SlangTexture1d => wgpu::TextureViewDimension::D1,
         ResourceShape::SlangTexture2d | ResourceShape::SlangTexture2dMultisample => {
             wgpu::TextureViewDimension::D2
@@ -884,11 +935,11 @@ fn is_available_in_compute(resource_command: &ResourceCommandData) -> bool {
     !matches!(resource_command, ResourceCommandData::RebindForDraw { .. })
 }
 fn is_available_in_graphics(parameter: &VariableLayout) -> bool {
-    match parameter.ty().kind() {
+    match parameter.ty().unwrap().kind() {
         TypeKind::Resource => matches!(
             (
-                parameter.ty().resource_shape(),
-                parameter.ty().resource_access(),
+                parameter.ty().unwrap().resource_shape(),
+                parameter.ty().unwrap().resource_access(),
             ),
             (
                 ResourceShape::SlangTexture2d | ResourceShape::SlangStructuredBuffer,
@@ -963,7 +1014,7 @@ fn get_wgpu_format_from_slang_format(
     }
 }
 
-fn load_strings(shader_reflection: &Shader) -> HashMap<u32, String> {
+fn load_strings(shader_reflection: &ProgramLayout) -> HashMap<u32, String> {
     (0..shader_reflection.hashed_string_count())
         .map(|i| shader_reflection.hashed_string(i).unwrap().to_string())
         .map(|s| (slang::reflection::compute_string_hash(s.as_str()), s))
@@ -991,7 +1042,7 @@ fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {
     }
 }
 
-fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
+fn parse_call_commands(reflection: &ProgramLayout) -> Vec<CallCommand> {
     let mut call_commands: Vec<CallCommand> = vec![];
     for entry_point in reflection.entry_points() {
         let fn_name = entry_point.name();
@@ -1013,15 +1064,17 @@ fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
                     .trim_matches('"');
                 let resource_reflection = reflection
                     .parameters()
-                    .find(|param| param.variable().name().unwrap() == resource_name)
+                    .find(|param| param.variable().unwrap().name() == resource_name)
                     .unwrap();
 
                 let mut element_size: Option<u32> = None;
-                if resource_reflection.ty().kind() == TypeKind::Resource
-                    && resource_reflection.ty().resource_shape()
+                if resource_reflection.ty().unwrap().kind() == TypeKind::Resource
+                    && resource_reflection.ty().unwrap().resource_shape()
                         == ResourceShape::SlangStructuredBuffer
                 {
-                    element_size = Some(get_size(resource_reflection.ty().resource_result_type()));
+                    element_size = Some(get_size(
+                        resource_reflection.ty().unwrap().resource_result_type(),
+                    ));
                 }
 
                 call_command = Some(CallCommand {
@@ -1057,11 +1110,11 @@ fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
                     .to_string();
                 let resource_reflection = reflection
                     .parameters()
-                    .find(|param| param.variable().name().unwrap() == resource_name)
+                    .find(|param| param.variable().unwrap().name() == resource_name)
                     .unwrap();
 
-                if resource_reflection.ty().kind() != TypeKind::Resource
-                    && resource_reflection.ty().resource_shape()
+                if resource_reflection.ty().unwrap().kind() != TypeKind::Resource
+                    && resource_reflection.ty().unwrap().resource_shape()
                         != ResourceShape::SlangStructuredBuffer
                 {
                     panic!("Invalid type for CALL_INDIRECT buffer");
@@ -1091,7 +1144,7 @@ fn parse_call_commands(reflection: &Shader) -> Vec<CallCommand> {
     call_commands
 }
 
-fn parse_draw_commands(reflection: &Shader) -> Vec<DrawCommand> {
+fn parse_draw_commands(reflection: &ProgramLayout) -> Vec<DrawCommand> {
     let mut draw_commands: Vec<DrawCommand> = vec![];
     for entry_point in reflection.entry_points() {
         let fn_name = entry_point.name();
@@ -1119,7 +1172,7 @@ fn parse_draw_commands(reflection: &Shader) -> Vec<DrawCommand> {
     draw_commands
 }
 
-fn get_uniform_size(shader_reflection: &Shader) -> u64 {
+fn get_uniform_size(shader_reflection: &ProgramLayout) -> u64 {
     let mut size = 0;
 
     for parameter in shader_reflection.parameters() {

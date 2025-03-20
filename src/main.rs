@@ -1291,7 +1291,7 @@ impl State {
                     printf_buffer_read,
                     PRINTF_BUFFER_ELEMENT_SIZE,
                 );
-    
+
                 if !format_print.is_empty() {
                     let result = format!("Shader Output:\n{}\n", format_print.join(""));
                     #[cfg(not(target_arch = "wasm32"))]
@@ -1299,9 +1299,9 @@ impl State {
                     #[cfg(target_arch = "wasm32")]
                     web_sys::console::log_1(&result.into())
                 }
-    
+
                 printf_buffer_read.unmap();
-                
+
                 print_received = true;
             }
             if print_received {
@@ -1480,7 +1480,10 @@ impl State {
             self.print_receiver = Some(receiver);
             printf_buffer_read
                 .slice(..)
-                .map_async(wgpu::MapMode::Read, move |r| sender.send(r.unwrap()).unwrap());
+                .map_async(wgpu::MapMode::Read, move |r| {
+                    r.unwrap();
+                    sender.send(()).unwrap()
+                });
             self.device.poll(wgpu::PollType::Wait).unwrap();
         }
         surface_texture.present();
@@ -1613,7 +1616,7 @@ impl DebugAppState {
         self.surface_config.height = height;
         self.surface.configure(&self.device, &self.surface_config);
     }
-    
+
     fn handle_input(&mut self, event: &WindowEvent) {
         self.egui_renderer.handle_input(&self.window, event);
     }
@@ -1859,10 +1862,7 @@ impl ApplicationHandler for App {
             .map(|w_id| w_id == _id)
             .unwrap_or(false)
         {
-            self.debug_app
-                .as_mut()
-                .unwrap()
-                .handle_input(&event);
+            self.debug_app.as_mut().unwrap().handle_input(&event);
 
             match event {
                 WindowEvent::CloseRequested => {
