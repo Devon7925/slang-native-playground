@@ -374,7 +374,7 @@ MaterialProperties material_props(RaycastResultLayer resultLayer, float3 ray_dir
     for (int layer_idx = 0; layer_idx < texture_layer_count; layer_idx++)
     {
         MaterialNoiseLayer layer = mat_render_props.layers[layer_idx];
-        float4 noise = grad_noise(layer.scale * resultLayer.pos + layer.movement * getTime());
+        float4 noise = grad_noise(layer.scale * resultLayer.pos + layer.movement * time);
         float distance_noise_factor = clamp(-0.1 * float(vertical_resolution) * dot(ray_dir, resultLayer.normal) / (max(resultLayer.dist, 0.1) * max3(layer.scale)), 0.0, 1.0);
         normal += distance_noise_factor * layer.normal_impact * noise.xyz * (float3(1) - abs(resultLayer.normal));
         color += layer.layer_color * lerp(0.0, noise.w, distance_noise_factor);
@@ -407,7 +407,7 @@ MaterialProperties position_material(RaycastResultLayer resultLayer, float3 ray_
     float3 weights = abs(relative_pos);
     uint result_vox = resultLayer.voxel_data;
     HeightData voxel_height_data = height_data[result_vox >> 24];
-    float result_height = (voxel_height_data.offset + voxel_height_data.impact * grad_noise(voxel_height_data.scale * resultLayer.pos + voxel_height_data.movement * getTime()).w) * (1.0 - weights.x) * (1.0 - weights.y) * (1.0 - weights.z);
+    float result_height = (voxel_height_data.offset + voxel_height_data.impact * grad_noise(voxel_height_data.scale * resultLayer.pos + voxel_height_data.movement * time).w) * (1.0 - weights.x) * (1.0 - weights.y) * (1.0 - weights.z);
     uint face_voxel_material = get_data(int3(floor(resultLayer.pos + resultLayer.normal))) >> 24;
     for (int i = 1; i < 8; i++)
     {

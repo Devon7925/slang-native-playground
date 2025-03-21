@@ -1,5 +1,8 @@
 import playground;
 
+[playground::MOUSE_POSITION]
+float4 mousePosition;
+
 [format("rgba8")]
 [playground::BLACK_SCREEN(1.0, 1.0)]
 WTexture2D<float4> outputTexture;
@@ -112,7 +115,7 @@ float4x4 CreatePerspectiveMatrix(float fovY, float aspectRatio, float nearZ, flo
 
 float3 getCameraDirection(float2 imageSize)
 {
-    float2 cameraControl = -3.141592 / 2.0 * (2.0 * getMousePosition().xy / imageSize - 1.0);
+    float2 cameraControl = -3.141592 / 2.0 * (2.0 * mousePosition.xy / imageSize - 1.0);
     return float3(sin(cameraControl.x) * cos(cameraControl.y), sin(cameraControl.y), cos(cameraControl.x) * cos(cameraControl.y));
 }
 
@@ -125,7 +128,7 @@ VOut vertexMain(uint vertexID: SV_VertexID)
 
     float aspectRatio = float(imageSize.x) / float(imageSize.y);
 
-    float2 cameraControl = float2(1.0, -1.0) * -3.141592 / 2.0 * (2.0 * getMousePosition().xy / float2(imageSize) - 1.0);
+    float2 cameraControl = float2(1.0, -1.0) * -3.141592 / 2.0 * (2.0 * mousePosition.xy / float2(imageSize) - 1.0);
     float3 cameraPos = float3(drawPlayerData[0], drawPlayerData[1], drawPlayerData[2]);
 
     Vertex input = verticies[vertexID];

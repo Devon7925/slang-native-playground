@@ -15,6 +15,8 @@ RWStructuredBuffer<uint> indirectBuffer;
 
 static const uint thread_count = 8;
 
+[playground::MOUSE_POSITION]
+float4 mousePosition;
 [playground::SLIDER(10.0, 4.0, 64.0)]
 uniform float brush_size;
 [playground::COLOR_PICK(1.0, 0.0, 1.0)]
@@ -25,14 +27,14 @@ uniform float3 color;
 [playground::CALL_INDIRECT("indirectBuffer", 0)]
 void draw(uint2 dispatchThreadId: SV_DispatchThreadID)
 {
-    if (getMousePosition().z >= 0)
+    if (mousePosition.z >= 0)
         return;
 
     let offset = float2(dispatchThreadId.xy) - brush_size;
     if (length(offset) > brush_size / 2)
         return;
 
-    var mouse_pos = uint2(getMousePosition().xy + offset);
+    var mouse_pos = uint2(mousePosition.xy + offset);
     tex_red[mouse_pos] = color.r;
     tex_green[mouse_pos] = color.g;
     tex_blue[mouse_pos] = color.b;

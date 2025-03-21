@@ -1,5 +1,8 @@
 import playground;
 
+[playground::MOUSE_POSITION]
+float4 mousePosition;
+
 [format("rgba8")]
 [playground::BLACK_SCREEN(1.0, 1.0)]
 WTexture2D<float4> outputTexture;
@@ -126,7 +129,7 @@ VOut vertexMain(uint vertexID: SV_VertexID)
 
     float aspectRatio = float(imageW) / float(imageH);
 
-    float2 cameraControl = float2(1.0, -1.0) * -3.141592 / 2.0 * (2.0 * getMousePosition().xy / float2(imageW, imageH) - 1.0);
+    float2 cameraControl = float2(1.0, -1.0) * -3.141592 / 2.0 * (2.0 * mousePosition.xy / float2(imageW, imageH) - 1.0);
     float3 cameraPos = float3(5.0 * sin(cameraControl.x) * cos(cameraControl.y), 5.0 * sin(cameraControl.y), 5.0 * cos(cameraControl.x) * cos(cameraControl.y));
 
     Vertex input = cube_verticies[vertexID];

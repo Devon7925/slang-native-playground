@@ -29,9 +29,6 @@ uniform float speed;
 [playground::DELTA_TIME]
 uniform float deltaTime;
 
-[playground::MOUSEPOSITION]
-uniform float4 mouse;
-
 [playground::CALL(1, 1, 1)]
 [shader("compute")]
 [numthreads(1, 1, 1)]

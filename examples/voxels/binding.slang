@@ -1,6 +1,11 @@
 import playground;
 import common;
 
+[playground::TIME]
+float time;
+[playground::MOUSE_POSITION]
+float4 mousePosition;
+
 static const int RENDER_SIZE_X = 16;
 static const int RENDER_SIZE_Y = 8;
 static const int RENDER_SIZE_Z = 16;
@@ -109,7 +114,7 @@ void setUnloadedChunk(uint3 dispatchThreadId: SV_DispatchThreadID)
 
 float3 getCameraDirection(float2 imageSize)
 {
-    float2 cameraControl = -3.141592 / 2.0 * (2.0 * getMousePosition().xy / imageSize - 1.0);
+    float2 cameraControl = -3.141592 / 2.0 * (2.0 * mousePosition.xy / imageSize - 1.0);
     return float3(sin(cameraControl.x) * cos(cameraControl.y), sin(cameraControl.y), cos(cameraControl.x) * cos(cameraControl.y));
 }
 

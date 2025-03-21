@@ -1,14 +1,4 @@
 [__AttributeUsage(_AttributeTargets.Var)]
-public struct playground_MOUSEPOSITIONAttribute
-{
-};
-
-[__AttributeUsage(_AttributeTargets.Var)]
-public struct playground_TIMEAttribute
-{
-};
-
-[__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_DELTA_TIMEAttribute
 {
 };
@@ -18,28 +8,6 @@ public struct playground_KEY_INPUTAttribute
 {
     string key;
 };
-
-[playground::MOUSEPOSITION]
-internal uniform float4 mousePosition;
-[playground::TIME]
-internal uniform float time;
-
-// Returns the current time in milliseconds.
-public float getTime()
-{
-    return time;
-}
-
-// Returns mouse position info.
-// xy: mouse position (in pixels) during last button down.
-// abs(zw): mouse position during last button click.
-// sign(mouze.z): button is down
-// sign(mouze.w): button is clicked
-//
-public float4 getMousePosition()
-{
-    return mousePosition;
-}
 
 // type field: 1 for format string, 2 for normal string, 3 for integer, 4 for float, 5 for double,
 struct FormattedStruct
@@ -151,17 +119,19 @@ public void printf<each T>(String format, expand each T values)
     print(format, expand each values);
 }
 
+// Initialize a \`float\` buffer with zeros of the provided size.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_ZEROSAttribute
 {
-    uint count;
+    int count;
 };
 
+// Initialize a \`float\` texture with zeros of the provided size.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_BLACKAttribute
 {
-    uint width;
-    uint height;
+    int width;
+    int height;
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
@@ -172,6 +142,7 @@ public struct playground_BLACK_3DAttribute
     uint sizeZ;
 };
 
+// Initialize a \`float\` texture with zeros of a size proportional to the screen size.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_BLACK_SCREENAttribute
 {
@@ -179,16 +150,18 @@ public struct playground_BLACK_SCREENAttribute
     float heightScale;
 };
 
+// Initialize a texture with image from URL.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_URLAttribute
 {
     string url;
 };
 
+// Initialize a \`float\` buffer with uniform random floats between 0 and 1.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_RANDAttribute
 {
-    uint count;
+    int count;
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
@@ -196,6 +169,21 @@ public struct playground_SAMPLERAttribute
 {
 };
 
+// Gives the current time in milliseconds.
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_TIMEAttribute
+{};
+
+// Gives mouse position info.
+// \`xy\`: mouse position (in pixels) during last button down.
+// \`abs(zw)\`: mouse position during last button click.
+// \`sign(mouze.z)\`: button is down
+// \`sign(mouze.w)\`: button is clicked
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_MOUSE_POSITIONAttribute
+{};
+
+// Control a \`float\` uniform with a provided default, minimum, and maximum.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_SLIDERAttribute
 {
@@ -204,6 +192,7 @@ public struct playground_SLIDERAttribute
     float max;
 };
 
+// Control a \`float3\` color uniform with a provided default color.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_COLOR_PICKAttribute
 {
@@ -212,20 +201,24 @@ public struct playground_COLOR_PICKAttribute
     float defaultBlue;
 };
 
+// Dispatch a compute pass with the given grid of threads.
+// The number of work - groups will be determined by dividing by the number of threads per work - group and rounding up.
 [__AttributeUsage(_AttributeTargets.Function)]
 public struct playground_CALLAttribute
 {
-    uint x;
-    uint y;
-    uint z;
+    int x;
+    int y;
+    int z;
 };
 
+// Dispatch a compute pass using the resource size to determine the work-group size.
 [__AttributeUsage(_AttributeTargets.Function)]
 public struct playground_CALL_SIZE_OFAttribute
 {
     string resourceName;
 };
 
+// Only dispatch the compute pass once at the start of rendering.
 [__AttributeUsage(_AttributeTargets.Function)]
 public struct playground_CALL_ONCEAttribute
 {

@@ -729,7 +729,7 @@ impl SlangCompiler {
                             / parameter.ty().unwrap().element_count(),
                         offset: parameter.offset(ParameterCategory::Uniform),
                     })
-                } else if playground_attribute_name == "MOUSEPOSITION" {
+                } else if playground_attribute_name == "MOUSE_POSITION" {
                     if parameter.ty().unwrap().kind() != TypeKind::Vector
                         || parameter.ty().unwrap().element_count() <= 3
                         || parameter.ty().unwrap().element_type().kind() != TypeKind::Scalar
