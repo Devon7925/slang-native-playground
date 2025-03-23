@@ -24,7 +24,7 @@ default-features = false
 features = ["links", "wayland", "x11"]
 
 [build-dependencies]
-slang = { path = "../slang-rs" }
+slang = { git = "https://github.com/Devon7925/slang-rs" }
 strum = "0.27"
 strum_macros = "0.27"
 wgpu = { version = "24.0.0", features = ["serde"] }

@@ -91,13 +91,30 @@ impl slang::FileSystem for CustomFileSystem {
                 .build()
                 .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
 
-            let response = client
-                .get(&url)
+            let mut request = client.get(&url);
+
+            // try to get token from GITHUB_TOKEN file in repo root if possible
+            let token = File::open("GITHUB_TOKEN").and_then(|mut f| {
+                let mut token = String::new();
+                f.read_to_string(&mut token)?;
+                Ok(token)
+            });
+            if let Ok(token) = token {
+                request = request.bearer_auth(token);
+            }
+
+            let response = request
                 .header("Accept", "application/vnd.github.v3.raw")
                 .send()
                 .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
 
             if response.status() != reqwest::StatusCode::OK {
+                if response.status() == 403 {
+                    println!(
+                        "cargo::warning=Loading file {} failed. Possibly rate limited.",
+                        path.clone()
+                    );
+                }
                 return Err(slang::Error::Blob(slang::Blob::from(format!(
                     "Failed to load file from github: {}",
                     response.status()
@@ -148,7 +165,6 @@ impl SlangCompiler {
         component_list: &mut Vec<slang::ComponentType>,
     ) {
         for imported_file in used_files {
-            println!("cargo::warning=Loading imported {}", imported_file);
             let module = slang_session
                 .load_module(&imported_file)
                 .unwrap_or_else(|e| {

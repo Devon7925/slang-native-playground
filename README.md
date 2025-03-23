@@ -96,6 +96,8 @@ Example:
 import "github://Devon7925/slang-native-playground/examples/free_flight_camera.slang";
 ```
 
+If you have rate limit issues you can create a github personal access token and put it in a `GITHUB_TOKEN` file at the root of the repository.
+
 ## Examples
 
 There are examples of use of the extra features in the `examples` folder. For single files, replace `user.slang` with their contents. For folders, replace the whole contents of `shaders/` with their contents.

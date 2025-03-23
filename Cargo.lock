@@ -3085,6 +3085,7 @@ dependencies = [
 [[package]]
 name = "slang"
 version = "0.1.0"
+source = "git+https://github.com/Devon7925/slang-rs#f799efcda1e3dde05d19df5c95ba5e56ce5df73a"
 dependencies = [
  "libc",
  "paste",
@@ -3129,6 +3130,7 @@ dependencies = [
 [[package]]
 name = "slang-sys"
 version = "0.1.0"
+source = "git+https://github.com/Devon7925/slang-rs#f799efcda1e3dde05d19df5c95ba5e56ce5df73a"
 dependencies = [
  "bindgen",
  "paste",
