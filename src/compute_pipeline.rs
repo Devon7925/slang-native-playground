@@ -142,8 +142,9 @@ impl ComputePipeline {
             }
 
             panic!(
-                "Cannot create bind-group. The following resources are not bound: {}",
-                missing_entries.join(", ")
+                "Cannot create bind-group. The following resources are not bound: {}\nAllocated Resources: {:?}",
+                missing_entries.join(", "),
+                allocated_resources,
             );
         }
 

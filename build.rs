@@ -9,7 +9,8 @@ use std::{
 
 use slang::{
     GlobalSession, ParameterCategory, ProgramLayout, ResourceAccess, ResourceShape, ScalarType,
-    Stage, TypeKind, reflection::VariableLayout,
+    Stage, TypeKind,
+    reflection::{TypeLayout, VariableLayout},
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -214,12 +215,12 @@ impl SlangCompiler {
     fn get_binding_descriptor(
         &self,
         index: u32,
-        program_reflection: &ProgramLayout,
+        reflection: &TypeLayout,
+        program_reflection: &TypeLayout,
         parameter: &slang::reflection::VariableLayout,
     ) -> Option<wgpu::BindingType> {
-        let global_layout = program_reflection.global_params_type_layout();
-
-        let binding_type = global_layout.descriptor_set_descriptor_range_type(0, index as i64);
+        let binding_type = program_reflection
+            .descriptor_set_descriptor_range_type(0, parameter.binding_index() as i64);
 
         match binding_type {
             slang::BindingType::Texture => Some(wgpu::BindingType::Texture {
@@ -228,9 +229,7 @@ impl SlangCompiler {
                 view_dimension: parameter_texture_view_dimension(parameter),
             }),
             slang::BindingType::MutableTeture => {
-                let format = global_layout
-                    .element_type_layout()
-                    .binding_range_image_format(index as i64 - 1);
+                let format = reflection.binding_range_image_format(index as i64);
                 Some(wgpu::BindingType::StorageTexture {
                     access: match parameter.ty().unwrap().resource_access() {
                         slang::ResourceAccess::Read => wgpu::StorageTextureAccess::ReadOnly,
@@ -274,22 +273,31 @@ impl SlangCompiler {
 
     fn get_resource_bindings(
         &self,
-        linked_program: &slang::ComponentType,
+        reflection: &TypeLayout,
+        top_level_reflection: &TypeLayout,
         resource_commands: &HashMap<String, ResourceCommandData>,
     ) -> HashMap<String, wgpu::BindGroupLayoutEntry> {
-        let reflection = linked_program.layout(0).unwrap(); // assume target-index = 0
+        if matches!(reflection.kind(), TypeKind::ConstantBuffer) {
+            return self.get_resource_bindings(
+                reflection.element_type_layout(),
+                top_level_reflection,
+                resource_commands,
+            );
+        }
 
         let mut resource_descriptors = HashMap::new();
         let mut uniform_input = false;
-        for parameter in reflection.parameters() {
+        for (parameter_idx, parameter) in reflection.fields().enumerate() {
             let name = parameter.variable().unwrap().name().to_string();
             if parameter.category() == ParameterCategory::Uniform {
                 uniform_input = true;
                 continue;
             }
 
+            let offset = reflection.field_binding_range_offset(parameter_idx as i64);
+
             let resource_info =
-                self.get_binding_descriptor(parameter.binding_index(), &reflection, parameter);
+                self.get_binding_descriptor(offset as u32, &reflection, &top_level_reflection, parameter);
             let mut visibility = wgpu::ShaderStages::NONE;
             if resource_commands
                 .get(&name)
@@ -331,20 +339,20 @@ impl SlangCompiler {
 
     fn resource_commands_from_attributes(
         &self,
-        shader_reflection: &ProgramLayout,
+        reflection: &TypeLayout,
+        top_level_reflection: &TypeLayout,
     ) -> HashMap<String, ResourceCommandData> {
+        if matches!(reflection.kind(), TypeKind::ConstantBuffer) {
+            return self.resource_commands_from_attributes(
+                reflection.element_type_layout(),
+                top_level_reflection,
+            );
+        }
+
         let mut commands: HashMap<String, ResourceCommandData> = HashMap::new();
 
-        for (parameter_idx, parameter) in shader_reflection
-            .global_params_type_layout()
-            .element_type_layout()
-            .fields()
-            .enumerate()
-        {
-            let offset = shader_reflection
-                .global_params_type_layout()
-                .element_type_layout()
-                .field_binding_range_offset(parameter_idx as i64);
+        for (parameter_idx, parameter) in reflection.fields().enumerate() {
+            let offset = reflection.field_binding_range_offset(parameter_idx as i64);
             for attribute in parameter.variable().unwrap().user_attributes() {
                 let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
                 else {
@@ -431,10 +439,7 @@ impl SlangCompiler {
                         )
                     }
 
-                    let format = shader_reflection
-                        .global_params_type_layout()
-                        .element_type_layout()
-                        .binding_range_image_format(offset);
+                    let format = reflection.binding_range_image_format(offset);
 
                     Some(ResourceCommandData::Black {
                         width: width as u32,
@@ -473,10 +478,7 @@ impl SlangCompiler {
                     check_positive!(size_y);
                     check_positive!(size_z);
 
-                    let format = shader_reflection
-                        .global_params_type_layout()
-                        .element_type_layout()
-                        .binding_range_image_format(offset);
+                    let format = reflection.binding_range_image_format(offset);
 
                     Some(ResourceCommandData::Black3D {
                         size_x: size_x as u32,
@@ -512,10 +514,7 @@ impl SlangCompiler {
                         )
                     }
 
-                    let format = shader_reflection
-                        .global_params_type_layout()
-                        .element_type_layout()
-                        .binding_range_image_format(offset);
+                    let format = reflection.binding_range_image_format(offset);
 
                     Some(ResourceCommandData::BlackScreen {
                         width_scale,
@@ -535,10 +534,7 @@ impl SlangCompiler {
                         )
                     }
 
-                    let format = shader_reflection
-                        .global_params_type_layout()
-                        .element_type_layout()
-                        .binding_range_image_format(offset);
+                    let format = reflection.binding_range_image_format(offset);
 
                     let format = get_wgpu_format_from_slang_format(
                         format,
@@ -971,11 +967,15 @@ impl SlangCompiler {
             }
         }
 
-        let resource_commands = self.resource_commands_from_attributes(&shader_reflection);
+        let global_layout = shader_reflection.global_params_type_layout();
+
+        let resource_commands =
+            self.resource_commands_from_attributes(&global_layout, &global_layout);
         let call_commands = parse_call_commands(&shader_reflection);
         let draw_commands = parse_draw_commands(&shader_reflection);
 
-        let bindings = self.get_resource_bindings(&linked_program, &resource_commands);
+        let bindings =
+            self.get_resource_bindings(&global_layout, &global_layout, &resource_commands);
 
         let uniform_controllers = get_uniform_sliders(&resource_commands);
 
