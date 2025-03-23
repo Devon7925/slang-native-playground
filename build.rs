@@ -1353,9 +1353,9 @@ fn get_uniform_update_code(uniform_controllers: &[UniformController]) -> String 
             }
             UniformControllerType::ColorPick { .. } => {
                 uniform_update_code += "
-    let slang_compiler::UniformControllerType::ColorPick {{ value, .. }} = _controller else {{
+    let slang_compiler::UniformControllerType::ColorPick { value, .. } = _controller else {
         panic!(\"Invalid generated code: Expected ColorPick got {:?}\", _controller);
-    }};
+    };
     let slice = [*value];";
             }
             UniformControllerType::MousePosition => {
