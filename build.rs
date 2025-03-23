@@ -1,7 +1,10 @@
 use std::{
+    cell::RefCell,
+    collections::HashSet,
     fs::{self, File, read},
     io::{Read, Write},
     ops::Deref,
+    rc::Rc,
 };
 
 use slang::{
@@ -40,36 +43,88 @@ impl Default for SlangCompiler {
     }
 }
 
+#[derive(Clone)]
 struct CustomFileSystem {
-    search_paths: Vec<String>,
+    used_files: Rc<RefCell<HashSet<String>>>,
 }
+
 impl CustomFileSystem {
-    fn new(search_paths: Vec<String>) -> Self {
-        Self { search_paths }
+    fn new() -> Self {
+        Self {
+            used_files: Rc::new(RefCell::new(HashSet::new())),
+        }
     }
 }
+
+impl CustomFileSystem {
+    fn get_files(&self) -> Rc<RefCell<HashSet<String>>> {
+        self.used_files.clone()
+    }
+}
+
 impl slang::FileSystem for CustomFileSystem {
     fn load_file(&self, path: &str) -> slang::Result<slang::Blob> {
         let mut path = path.to_string();
-        if path.ends_with(".slang-module") {
-            path = path.strip_suffix("-module").unwrap().to_string();
-        }
-        path = path.split(":").next().unwrap().to_string();
-        if !path.ends_with(".slang") {
-            path.push_str(".slang");
-        }
-        for search_path in self.search_paths.iter() {
-            let full_path = format!("{}/{}", search_path, path);
-            if fs::metadata(&full_path).is_ok() {
-                let mut file = File::open(&full_path)
-                    .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
 
-                let mut contents = Vec::new();
-                file.read_to_end(&mut contents)
-                    .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+        // Remove automatically added path prefix for github imports
+        let re = &regex::Regex::new(r"^.*/github://").unwrap();
+        path = re.replace_all(path.as_str(), "github://").to_string();
 
-                return Ok(slang::Blob::from(contents));
+        if let Some(git_path) = path.strip_prefix("github://") {
+            // first 2 parts of path are the user and repo
+            // Use git api to get files ex. "https://api.github.com/repos/shader-slang/slang-playground/contents/example.slang"
+            let parts: Vec<&str> = git_path.split('/').collect();
+            if parts.len() < 3 {
+                return Err(slang::Error::Blob(slang::Blob::from("Invalid github path")));
             }
+            let user = parts[0];
+            let repo = parts[1];
+            let file_path = parts[2..].join("/");
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/contents/{}",
+                user, repo, file_path
+            );
+
+            // Set the User-Agent header to avoid 403 Forbidden error
+            let client = reqwest::blocking::Client::builder()
+                .user_agent("slang-playground")
+                .build()
+                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+
+            let response = client
+                .get(&url)
+                .header("Accept", "application/vnd.github.v3.raw")
+                .send()
+                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+
+            if response.status() != reqwest::StatusCode::OK {
+                return Err(slang::Error::Blob(slang::Blob::from(format!(
+                    "Failed to load file from github: {}",
+                    response.status()
+                ))));
+            }
+
+            let response = response
+                .text()
+                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+            self.used_files.borrow_mut().insert(path.clone());
+            return Ok(slang::Blob::from(response.into_bytes()));
+        }
+
+        // Remove Hexadecimal id suffix
+        let re = &regex::Regex::new(r":[0-9a-fA-F]+\..*").unwrap();
+        path = re.replace_all(&path, "").to_string();
+
+        if fs::metadata(&path).is_ok() {
+            let mut file = File::open(&path)
+                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents)
+                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+
+            self.used_files.borrow_mut().insert(path.clone());
+            return Ok(slang::Blob::from(contents));
         }
 
         Err(slang::Error::Blob(slang::Blob::from("File not found")))
@@ -88,12 +143,21 @@ impl SlangCompiler {
 
     fn add_components(
         &self,
-        user_module: slang::Module,
         slang_session: &slang::Session,
+        used_files: impl IntoIterator<Item = String>,
         component_list: &mut Vec<slang::ComponentType>,
     ) {
-        for imported_file in user_module.dependency_file_paths() {
-            let module = slang_session.load_module(imported_file).unwrap();
+        for imported_file in used_files {
+            println!("cargo::warning=Loading imported {}", imported_file);
+            let module = slang_session
+                .load_module(&imported_file)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to load module {}: {:?}",
+                        imported_file,
+                        e.to_string()
+                    )
+                });
 
             component_list.push(module.deref().clone());
 
@@ -113,6 +177,7 @@ impl SlangCompiler {
                 .find_function_by_name(st.as_str())
                 .is_some()
             {
+                println!("cargo::warning=Loading shader type {}", st);
                 let module = slang_session
                     .load_module(format!("{}.slang", st).as_str())
                     .unwrap();
@@ -807,7 +872,6 @@ impl SlangCompiler {
     }
 
     pub fn compile(&self, search_paths: Vec<&str>, entry_module_name: &str) -> CompilationResult {
-        let original_search_paths = search_paths.clone();
         let search_paths = search_paths
             .into_iter()
             .map(std::ffi::CString::new)
@@ -824,12 +888,7 @@ impl SlangCompiler {
             .format(slang::CompileTarget::Wgsl)
             .profile(self.global_slang_session.find_profile("spirv_1_6"));
 
-        let custom_file_system = CustomFileSystem::new(
-            original_search_paths
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-        );
+        let custom_file_system = CustomFileSystem::new();
 
         let targets = [target_desc];
 
@@ -837,7 +896,7 @@ impl SlangCompiler {
             .targets(&targets)
             .search_paths(&search_paths)
             .options(&session_options)
-            .file_system(custom_file_system);
+            .file_system(custom_file_system.clone());
 
         let Ok(slang_session) = self.global_slang_session.create_session(&session_desc) else {
             // let error = self.slang_wasm_module.get_last_error();
@@ -849,7 +908,16 @@ impl SlangCompiler {
 
         let mut components: Vec<slang::ComponentType> = vec![];
 
-        let user_module = slang_session.load_module(entry_module_name).unwrap();
+        let user_module = match slang_session.load_module(entry_module_name) {
+            Ok(module) => module,
+            Err(e) => {
+                panic!(
+                    "Failed to load module {}: {:?}",
+                    entry_module_name,
+                    e.to_string()
+                );
+            }
+        };
 
         // For now, we just don't allow user to define image_main or print_main as entry point name for simplicity
         let count = user_module.entry_point_count();
@@ -865,7 +933,8 @@ impl SlangCompiler {
             }
         }
 
-        self.add_components(user_module, &slang_session, &mut components);
+        let used_files = custom_file_system.get_files().borrow().clone();
+        self.add_components(&slang_session, used_files, &mut components);
 
         let program = slang_session
             .create_composite_component_type(components.as_slice())

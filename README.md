@@ -86,6 +86,16 @@ struct Vertex
 }
 ```
 
+### Github Imports
+
+Allows importing slang files directly from github using `github://user_name/repo_name/path/file.slang`.
+
+Example:
+
+```slang
+import "github://Devon7925/slang-native-playground/examples/free_flight_camera.slang";
+```
+
 ## Examples
 
 There are examples of use of the extra features in the `examples` folder. For single files, replace `user.slang` with their contents. For folders, replace the whole contents of `shaders/` with their contents.
