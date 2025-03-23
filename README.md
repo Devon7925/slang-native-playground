@@ -18,7 +18,7 @@ Depends on [slang-rs](https://github.com/FloatyMonkey/slang-rs). See that repo i
 | ShaderToy: Circle | ✅ | |
 | ShaderToy: Ocean | ✅ | |
 | 2D Splatter | ✅ | |
-| Differentiable 2D Splatter | ❌ | Blocked on atomic reflection not working in slang. See https://github.com/shader-slang/slang/issues/6257. |
+| Differentiable 2D Splatter | ✅ | |
 | | | |
 | Properties | ✅ | |
 | Generics & Extensions | ✅ | |

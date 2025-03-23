@@ -296,8 +296,12 @@ impl SlangCompiler {
 
             let offset = reflection.field_binding_range_offset(parameter_idx as i64);
 
-            let resource_info =
-                self.get_binding_descriptor(offset as u32, &reflection, &top_level_reflection, parameter);
+            let resource_info = self.get_binding_descriptor(
+                offset as u32,
+                &reflection,
+                &top_level_reflection,
+                parameter,
+            );
             let mut visibility = wgpu::ShaderStages::NONE;
             if resource_commands
                 .get(&name)
@@ -377,7 +381,9 @@ impl SlangCompiler {
                     }
                     Some(ResourceCommandData::Zeros {
                         count: count as u32,
-                        element_size: get_size(parameter.ty().unwrap().resource_result_type()),
+                        element_size: get_size(
+                            parameter.type_layout().element_type_layout().ty().unwrap(),
+                        ),
                     })
                 } else if playground_attribute_name == "SAMPLER" {
                     if parameter.ty().unwrap().kind() != TypeKind::SamplerState {
