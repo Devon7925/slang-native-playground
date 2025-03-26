@@ -12,6 +12,7 @@ static const int RENDER_SIZE_Z = 16;
 static const int MAX_CHUNKS = 2048;
 
 static const int MAX_CHUNK_LOADS = 128;
+static const int MAX_CHUNK_UPDATES = 256;
 
 static const int MAX_DIMENTION = 2048;
 static const int MAX_DIMENSION_CHUNKS = MAX_DIMENTION / CHUNK_SIZE;
@@ -34,6 +35,28 @@ RWStructuredBuffer<int> availableChunks;
 
 [playground::ZEROS(MAX_CHUNK_LOADS)]
 RWStructuredBuffer<int4> chunkLoads;
+
+[playground::ZEROS(8 * RENDER_SIZE_X * RENDER_SIZE_Y * RENDER_SIZE_Z)]
+RWStructuredBuffer<Atomic<uint>> updatedChunks;
+
+[playground::ZEROS(8 * MAX_CHUNK_UPDATES)]
+RWStructuredBuffer<int3> chunkUpdates;
+
+struct GameData
+{
+    float3 playerPos;
+    int voxelOffset;
+    int3 startPos;
+    Atomic<int> chunksAvailable;
+    Atomic<int> currentChunkLoads;
+    Atomic<int>[8] currentChunkUpdates;
+}
+
+[playground::ZEROS(1)]
+RWStructuredBuffer<GameData> gameData;
+
+[playground::ZEROS(8)]
+RWStructuredBuffer<uint> indirectBuffer;
 
 [playground::CALL(MAX_CHUNKS, 1, 1)]
 [playground::CALL_ONCE]
@@ -61,24 +84,31 @@ void unload_chunk(int3 chunk_pos)
         return;
     let chunk_loc = int3(chunk_idx % MAX_CHUNKS_X, (chunk_idx / MAX_CHUNKS_X) % MAX_CHUNKS_Y, chunk_idx / MAX_CHUNKS_X / MAX_CHUNKS_Y);
     chunks.Store(floorMod(chunk_pos, RENDER_SIZE), 0);
-    availableChunks[gameData[0].chunksAvailable] = chunk_idx;
-    gameData[0].chunksAvailable++;
+    let availableChunkIdx = gameData[0].chunksAvailable.add(1);
+    availableChunks[availableChunkIdx] = chunk_idx;
 }
 
-struct GameData
+void queue_update_all(int3 chunk_pos)
 {
-    float3 playerPos;
-    int voxelOffset;
-    int3 startPos;
-    int chunksAvailable;
-    int currentChunkLoads;
+    let chunk_ptr = floorMod(chunk_pos, RENDER_SIZE);
+    for (var i = 0; i < 8; i++)
+    {
+        let chunk_idx = i * RENDER_SIZE_X * RENDER_SIZE_Y * RENDER_SIZE_Z + chunk_ptr.x + chunk_ptr.y * RENDER_SIZE_X + chunk_ptr.z * RENDER_SIZE_X * RENDER_SIZE_Y;
+        let updateCheckIdx = gameData[0].currentChunkUpdates[i].load();
+        if (updateCheckIdx >= MAX_CHUNK_UPDATES) {
+            continue;
+        }
+        let was_already_queued = updatedChunks[chunk_idx].exchange(1);
+        if (was_already_queued == 1) {
+            continue;
+        }
+        let updateIdx = gameData[0].currentChunkUpdates[i].increment();
+        if (updateIdx >= MAX_CHUNK_UPDATES) {
+            continue;
+        }
+        chunkUpdates[updateIdx + i * MAX_CHUNK_UPDATES] = chunk_pos;
+    }
 }
-
-[playground::ZEROS(1)]
-RWStructuredBuffer<GameData> gameData;
-
-[playground::ZEROS(8)]
-RWStructuredBuffer<uint> indirectBuffer;
 
 [playground::CALL_ONCE]
 [playground::CALL(1, 1, 1)]
@@ -90,9 +120,9 @@ void setup(uint3 dispatchThreadId: SV_DispatchThreadID)
 
     uint3 voxelSize;
     voxels.GetDimensions(voxelSize.x, voxelSize.y, voxelSize.z);
-    indirectBuffer[0] = voxelSize.x / VOXEL_UPDATE_SIZE / 2;
-    indirectBuffer[1] = voxelSize.y / VOXEL_UPDATE_SIZE / 2;
-    indirectBuffer[2] = voxelSize.z / VOXEL_UPDATE_SIZE / 2;
+    indirectBuffer[0] = 0;
+    indirectBuffer[1] = CHUNK_SIZE / VOXEL_UPDATE_SIZE / 2;
+    indirectBuffer[2] = CHUNK_SIZE / VOXEL_UPDATE_SIZE / 2;
 
     indirectBuffer[4] = 0;
     indirectBuffer[5] = CHUNK_SIZE / 4;
@@ -100,7 +130,7 @@ void setup(uint3 dispatchThreadId: SV_DispatchThreadID)
 
     gameData[0].startPos = int3(0);
     gameData[0].chunksAvailable = MAX_CHUNKS;
-    gameData[0].currentChunkLoads = 0;
+    gameData[0].currentChunkLoads.store(0);
 }
 
 [playground::CALL_ONCE]
@@ -147,5 +177,16 @@ void set_data(int3 global_pos, uint data)
         return;
     if (og_voxel_data >> 24 == MAT_AIR_OOB)
         return;
+    if (og_voxel_data != data) {
+        let chunk_pos = floorDiv(global_pos, CHUNK_SIZE);
+        let pos_in_chunk = floorMod(global_pos, CHUNK_SIZE);
+        let min_pos = select(pos_in_chunk == 0, -1, 0);
+        let max_pos = select(pos_in_chunk == CHUNK_SIZE - 1, 1, 0);
+        for (var dx = min_pos.x; dx <= max_pos.x; dx++)
+            for (var dy = min_pos.y; dy <= max_pos.y; dy++)
+                for (var dz = min_pos.z; dz <= max_pos.z; dz++)
+                    queue_update_all(chunk_pos + int3(dx, dy, dz));
+
+    }
     voxels.Store(get_index(global_pos), data);
 }

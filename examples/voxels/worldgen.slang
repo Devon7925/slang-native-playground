@@ -118,6 +118,9 @@ void worldgen(uint3 dispatchThreadId: SV_DispatchThreadID)
     int3 pos = dispatchThreadId;
     pos.x = pos.x % CHUNK_SIZE;
     let idx = dispatchThreadId.x / CHUNK_SIZE;
+    if (idx > gameData[0].currentChunkLoads.load()) {
+        return;
+    }
     let chunk_location = chunkLoads[idx].xyz;
     pos += CHUNK_SIZE * chunk_location;
 

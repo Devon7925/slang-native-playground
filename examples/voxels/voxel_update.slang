@@ -3,10 +3,18 @@ import common;
 import binding;
 
 [numthreads(VOXEL_UPDATE_SIZE, VOXEL_UPDATE_SIZE, VOXEL_UPDATE_SIZE)]
-// [playground::CALL_INDIRECT("indirectBuffer", 0)]
+[playground::CALL_INDIRECT("indirectBuffer", 0)]
 void voxelUpdate(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
-    int3 pos = 2 * dispatchThreadId + get_voxel_update_offset();
+    uint idx = dispatchThreadId.x * 2 / CHUNK_SIZE;
+    let chunk = chunkUpdates[idx + MAX_CHUNK_UPDATES * gameData[0].voxelOffset];
+    let pos_in_chunk = (dispatchThreadId * 2) % CHUNK_SIZE;
+
+    let chunk_ptr = floorMod(chunk, RENDER_SIZE);
+    let chunk_idx = gameData[0].voxelOffset * RENDER_SIZE_X * RENDER_SIZE_Y * RENDER_SIZE_Z + chunk_ptr.x + chunk_ptr.y * RENDER_SIZE_X + chunk_ptr.z * RENDER_SIZE_X * RENDER_SIZE_Y;
+    updatedChunks[chunk_idx].store(0);
+
+    int3 pos = CHUNK_SIZE * chunk + pos_in_chunk + get_voxel_update_offset();
     uint2 pos_data[2][2][2];
     for (uint i = 0; i < 2; i++)
     {

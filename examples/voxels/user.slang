@@ -24,6 +24,9 @@ uniform float ctrlPressed;
 [playground::KEY_INPUT("Shift")]
 uniform float shiftPressed;
 
+[playground::KEY_INPUT("1")]
+uniform float createWater;
+
 [playground::SLIDER(5.0, 0.0, 20.0)]
 uniform float speed;
 [playground::DELTA_TIME]
@@ -49,6 +52,10 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
     cameraPos += mul(inputVector, inputTransform);
 
     gameData[0].playerPos = cameraPos;
+
+    if (createWater > 0) {
+        set_data(int3(gameData[0].playerPos), MAT_WATER << 24);
+    }
 
     gameData[0].voxelOffset = (gameData[0].voxelOffset + 1) % 8;
 
@@ -115,7 +122,7 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
 
     gameData[0].startPos += shift;
 
-    gameData[0].currentChunkLoads = 0;
+    gameData[0].currentChunkLoads.store(0);
 
     for (int x = -2; x <= 2; x++)
     {
@@ -127,16 +134,20 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
                 let checkChunkIdx = floorMod(checkChunk, RENDER_SIZE);
                 if (chunks.Load(checkChunkIdx) == 0)
                 {
-                    gameData[0].chunksAvailable--;
-                    let chunk = availableChunks[gameData[0].chunksAvailable];
+                    let availableChunk = gameData[0].chunksAvailable.sub(1);
+                    let chunk = availableChunks[availableChunk - 1];
                     chunks.Store(checkChunkIdx, chunk);
-                    chunkLoads[gameData[0].currentChunkLoads] = int4(checkChunk, chunk);
-                    gameData[0].currentChunkLoads++;
+                    let chunkLoadIdx = gameData[0].currentChunkLoads.add(1);
+                    chunkLoads[chunkLoadIdx] = int4(checkChunk, chunk);
+                    queue_update_all(checkChunk);
                 }
             }
         }
     }
-    indirectBuffer[4] = CHUNK_SIZE / 4 * gameData[0].currentChunkLoads;
+    AllMemoryBarrier();
+    indirectBuffer[0] = CHUNK_SIZE / VOXEL_UPDATE_SIZE / 2 * gameData[0].currentChunkUpdates[gameData[0].voxelOffset].load();
+    indirectBuffer[4] = CHUNK_SIZE / 4 * gameData[0].currentChunkLoads.load();
+    gameData[0].currentChunkUpdates[gameData[0].voxelOffset].store(0);
 }
 
 float4 imageMain(uint2 dispatchThreadID, int2 screenSize)
