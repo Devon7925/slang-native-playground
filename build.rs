@@ -381,8 +381,8 @@ impl SlangCompiler {
                     }
                     Some(ResourceCommandData::Zeros {
                         count: count as u32,
-                        element_size: get_size(
-                            parameter.type_layout().element_type_layout().ty().unwrap(),
+                        element_size: get_layout_size(
+                            parameter.type_layout().element_type_layout(),
                         ),
                     })
                 } else if playground_attribute_name == "SAMPLER" {
@@ -1112,6 +1112,29 @@ fn load_strings(shader_reflection: &ProgramLayout) -> HashMap<u32, String> {
         .collect()
 }
 
+fn get_layout_size(resource_result_type: &slang::reflection::TypeLayout) -> u32 {
+    match resource_result_type.kind() {
+        TypeKind::Scalar => match resource_result_type.scalar_type().unwrap() {
+            slang::ScalarType::Int8 | slang::ScalarType::Uint8 => 1,
+            slang::ScalarType::Int16 | slang::ScalarType::Uint16 | slang::ScalarType::Float16 => 2,
+            slang::ScalarType::Int32 | slang::ScalarType::Uint32 | slang::ScalarType::Float32 => 4,
+            slang::ScalarType::Int64 | slang::ScalarType::Uint64 | slang::ScalarType::Float64 => 8,
+            _ => panic!("Unimplemented scalar type"),
+        },
+        TypeKind::Vector => {
+            let count = resource_result_type.element_count().unwrap().next_power_of_two() as u32;
+            count * get_layout_size(resource_result_type.element_type_layout())
+        }
+        TypeKind::Struct => resource_result_type
+            .fields()
+            .map(|f| get_layout_size(f.type_layout()))
+            .fold(0, |a, f| (a + f).div_ceil(f) * f),
+        TypeKind::Array => 
+            get_layout_size(resource_result_type.element_type_layout()) * resource_result_type.element_count().unwrap() as u32,
+        ty => panic!("Unimplemented type {ty:?} for get_size"),
+    }
+}
+
 fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {
     match resource_result_type.kind() {
         TypeKind::Scalar => match resource_result_type.scalar_type() {
@@ -1153,8 +1176,15 @@ fn parse_call_commands(reflection: &ProgramLayout) -> Vec<CallCommand> {
                     .argument_value_string(0)
                     .unwrap()
                     .trim_matches('"');
-                let resource_reflection = reflection
-                    .parameters()
+
+                let mut resource_reflection = reflection
+                    .global_params_type_layout();
+
+                if matches!(resource_reflection.kind(), TypeKind::ConstantBuffer) {
+                    resource_reflection = resource_reflection.element_type_layout();
+                }
+                let resource_reflection = resource_reflection
+                    .fields()
                     .find(|param| param.variable().unwrap().name() == resource_name)
                     .unwrap();
 
