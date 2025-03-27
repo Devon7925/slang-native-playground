@@ -961,7 +961,9 @@ impl SlangCompiler {
 
         let shader_reflection = linked_program.layout(0).unwrap();
         let hashed_strings = load_strings(&shader_reflection);
-        let out_code = linked_program.target_code(0).unwrap().as_slice().to_vec();
+        let out_code = linked_program.target_code(0).unwrap_or_else(|err| {
+            panic!("Failed to compile shader: {:?}", err.to_string())
+        }).as_slice().to_vec();
         let out_code = String::from_utf8(out_code).unwrap();
 
         let mut entry_group_sizes = HashMap::new();
