@@ -53,7 +53,8 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
 
     gameData[0].playerPos = cameraPos;
 
-    if (createWater > 0) {
+    if (createWater > 0)
+    {
         set_data(int3(gameData[0].playerPos), MAT_WATER << 24);
     }
 
@@ -122,8 +123,6 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
 
     gameData[0].startPos += shift;
 
-    gameData[0].currentChunkLoads.store(0);
-
     for (int x = -2; x <= 2; x++)
     {
         for (int y = -2; y <= 2; y++)
@@ -134,12 +133,7 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
                 let checkChunkIdx = floorMod(checkChunk, RENDER_SIZE);
                 if (chunks.Load(checkChunkIdx) == 0)
                 {
-                    let availableChunk = gameData[0].chunksAvailable.sub(1);
-                    let chunk = availableChunks[availableChunk - 1];
-                    chunks.Store(checkChunkIdx, chunk);
-                    let chunkLoadIdx = gameData[0].currentChunkLoads.add(1);
-                    chunkLoads[chunkLoadIdx] = int4(checkChunk, chunk);
-                    queue_update_all(checkChunk);
+                    loadChunk(checkChunk);
                 }
             }
         }
@@ -147,7 +141,10 @@ void update(uint2 dispatchThreadId: SV_DispatchThreadID)
     AllMemoryBarrier();
     indirectBuffer[0] = CHUNK_SIZE / VOXEL_UPDATE_SIZE / 2 * gameData[0].currentChunkUpdates[gameData[0].voxelOffset].load();
     indirectBuffer[4] = CHUNK_SIZE / 4 * gameData[0].currentChunkLoads.load();
+    indirectBuffer[8] = gameData[0].currentChunkLoads.load();
+
     gameData[0].currentChunkUpdates[gameData[0].voxelOffset].store(0);
+    gameData[0].currentChunkLoads.store(0);
 }
 
 float4 imageMain(uint2 dispatchThreadID, int2 screenSize)

@@ -42,7 +42,7 @@ float4 mul_gradient(float4 a, float4 b)
     return float4(a.xyz * b.w + a.w * b.xyz, a.w * b.w);
 }
 
-public uint get_worldgen(int3 global_pos)
+uint get_worldgen(int3 global_pos)
 {
     int2 chunk_pos = floorDiv(global_pos.xz, 32);
     float3 tree_pos = 32.0 * float3(chunk_pos, 0.0) + 3.0 + 26.0 * float3(pcg3d(chunk_pos.xxy).xyz & 0xFF) / 256.0;
@@ -111,6 +111,22 @@ public uint get_worldgen(int3 global_pos)
     return MAT_AIR << 24;
 }
 
+[numthreads(1, 1, 1)]
+[playground::CALL_INDIRECT("indirectBuffer", 32)]
+void worldgen_setup(uint3 dispatchThreadId: SV_DispatchThreadID)
+{
+    let chunk_location = chunkLoads[dispatchThreadId.x].xyz;
+    if (!chunk_in_bounds(chunk_location))
+    {
+        return;
+    }
+    let chunk_ptr = floorMod(chunk_location, RENDER_SIZE);
+    chunks.Store(chunk_ptr, chunkLoads[dispatchThreadId.x].w);
+
+    let chunk_idx = 8 * RENDER_SIZE_X * RENDER_SIZE_Y * RENDER_SIZE_Z + chunk_ptr.x + chunk_ptr.y * RENDER_SIZE_X + chunk_ptr.z * RENDER_SIZE_X * RENDER_SIZE_Y;
+    updatedChunks[chunk_idx].store(0);
+}
+
 [numthreads(4, 4, 4)]
 [playground::CALL_INDIRECT("indirectBuffer", 16)]
 void worldgen(uint3 dispatchThreadId: SV_DispatchThreadID)
@@ -118,13 +134,20 @@ void worldgen(uint3 dispatchThreadId: SV_DispatchThreadID)
     int3 pos = dispatchThreadId;
     pos.x = pos.x % CHUNK_SIZE;
     let idx = dispatchThreadId.x / CHUNK_SIZE;
-    if (idx > gameData[0].currentChunkLoads.load()) {
+    let chunk_location = chunkLoads[idx].xyz;
+    if (!chunk_in_bounds(chunk_location))
+    {
         return;
     }
-    let chunk_location = chunkLoads[idx].xyz;
     pos += CHUNK_SIZE * chunk_location;
 
+    let chunk_idx = chunkLoads[idx].w;
+    let chunk_loc = int3(chunk_idx % MAX_CHUNKS_X, (chunk_idx / MAX_CHUNKS_X) % MAX_CHUNKS_Y, chunk_idx / MAX_CHUNKS_X / MAX_CHUNKS_Y);
     uint data = get_worldgen(pos);
+    voxels.Store(CHUNK_SIZE * chunk_loc + floorMod(pos, CHUNK_SIZE), data);
 
-    set_data(pos, data);
+    if (all(floorMod(pos, CHUNK_SIZE) == 0))
+    {
+        queue_update_all(chunk_location);
+    }
 }
