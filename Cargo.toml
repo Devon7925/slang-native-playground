@@ -12,33 +12,18 @@ bytemuck = "1.21.0"
 rand = "0.9.0"
 regex = "1.11.1"
 serde = { version = "1.0.217", features = ["derive"] }
-ron = "0.8.1"
+ron = "0.9.0"
 flume = "0.11.1"
 web-time = "1.1.0"
 futures = "0.3.31"
+slang-compiler-type-definitions = { path = "slang-compiler-type-definitions" }
+slang-shader-macros = { path = "slang-shader-macros" }
 
 [dependencies.egui-winit]
 version = "0.31.1"
 # Required for compiling to WASM
 default-features = false
 features = ["links", "wayland", "x11"]
-
-[build-dependencies]
-slang = { git = "https://github.com/Devon7925/slang-rs" }
-strum = "0.27"
-strum_macros = "0.27"
-wgpu = { version = "24.0.0", features = ["serde"] }
-serde = { version = "1.0.217", features = ["derive"] }
-ron = "0.8.1"
-tobj = "4.0.3"
-bytemuck = "1.21.0"
-reqwest = { version = "0.12.12", features = ["blocking"] }
-image = "0.25.5"
-url = "2.5.4"
-regex = "1.11.1"
-
-[patch.crates-io]
-wgpu = { git = "https://github.com/gfx-rs/wgpu.git", rev = "d6ca412" }
 
 [target.wasm32-unknown-unknown.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
@@ -51,3 +36,6 @@ wasm-bindgen-futures = "0.4.50"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 egui-wgpu = "0.31.0"
 egui = "0.31.0"
+
+[patch.crates-io]
+wgpu = { git = "https://github.com/gfx-rs/wgpu.git", rev = "d6ca412" }

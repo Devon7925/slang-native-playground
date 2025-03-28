@@ -1,8 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashSet,
-    fs::{self, File, read},
-    io::{Read, Write},
+    collections::{HashMap, HashSet},
     ops::Deref,
     rc::Rc,
 };
@@ -12,11 +10,13 @@ use slang::{
     Stage, TypeKind,
     reflection::{TypeLayout, VariableLayout},
 };
+use slang_compiler_type_definitions::{
+    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
+    UniformController, UniformControllerType,
+};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-use url::{ParseError, Url};
-
-include!("src/slang_compiler.rs");
+use url::Url;
 
 #[derive(EnumIter, Debug, PartialEq, Clone)]
 enum ShaderType {
@@ -35,7 +35,6 @@ impl ShaderType {
 
 pub struct SlangCompiler {
     global_slang_session: GlobalSession,
-    // compile_target_map: { name: string, value: number }[] | null,
 }
 
 impl Default for SlangCompiler {
@@ -55,9 +54,7 @@ impl CustomFileSystem {
             used_files: Rc::new(RefCell::new(HashSet::new())),
         }
     }
-}
 
-impl CustomFileSystem {
     fn get_files(&self) -> Rc<RefCell<HashSet<String>>> {
         self.used_files.clone()
     }
@@ -95,29 +92,27 @@ impl slang::FileSystem for CustomFileSystem {
             let mut request = client.get(&url);
 
             // try to get token from GITHUB_TOKEN file in repo root if possible
-            let token = File::open("GITHUB_TOKEN").and_then(|mut f| {
-                let mut token = String::new();
-                f.read_to_string(&mut token)?;
-                Ok(token)
-            });
+            let token = std::fs::read_to_string("GITHUB_TOKEN");
+            
             if let Ok(token) = token {
-                request = request.bearer_auth(token);
-            }
+                request = request.header("Authorization", format!("token {}", token));
+            };
 
             let response = request
                 .header("Accept", "application/vnd.github.v3.raw")
                 .send()
                 .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
 
-            if response.status() != reqwest::StatusCode::OK {
+            if !response.status().is_success() {
                 if response.status() == 403 {
                     println!(
                         "cargo::warning=Loading file {} failed. Possibly rate limited.",
                         path.clone()
                     );
                 }
+
                 return Err(slang::Error::Blob(slang::Blob::from(format!(
-                    "Failed to load file from github: {}",
+                    "Failed to get file from github: {}",
                     response.status()
                 ))));
             }
@@ -127,33 +122,24 @@ impl slang::FileSystem for CustomFileSystem {
                 .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
             self.used_files.borrow_mut().insert(path.clone());
             return Ok(slang::Blob::from(response.into_bytes()));
+        } else {
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    self.used_files.borrow_mut().insert(path);
+                    Ok(slang::Blob::from(bytes))
+                }
+                Err(e) => Err(slang::Error::Blob(slang::Blob::from(format!(
+                    "Failed to read file: {}",
+                    e
+                )))),
+            }
         }
-
-        // Remove Hexadecimal id suffix
-        let re = &regex::Regex::new(r":[0-9a-fA-F]+\..*").unwrap();
-        path = re.replace_all(&path, "").to_string();
-
-        if fs::metadata(&path).is_ok() {
-            let mut file = File::open(&path)
-                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
-
-            let mut contents = Vec::new();
-            file.read_to_end(&mut contents)
-                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
-
-            self.used_files.borrow_mut().insert(path.clone());
-            return Ok(slang::Blob::from(contents));
-        }
-
-        Err(slang::Error::Blob(slang::Blob::from("File not found")))
     }
 }
 
 impl SlangCompiler {
     pub fn new() -> Self {
         let global_slang_session = slang::GlobalSession::new().unwrap();
-        // self.compile_target_map = slang::get_compile_targets();
-
         SlangCompiler {
             global_slang_session,
         }
@@ -194,7 +180,6 @@ impl SlangCompiler {
                 .find_function_by_name(st.as_str())
                 .is_some()
             {
-                println!("cargo::warning=Loading shader type {}", st);
                 let module = slang_session
                     .load_module(format!("{}.slang", st).as_str())
                     .unwrap();
@@ -554,15 +539,16 @@ impl SlangCompiler {
                         .to_string();
 
                     let parsed_url = Url::parse(&url);
-                    let image_bytes = if let Err(ParseError::RelativeUrlWithoutBase) = parsed_url {
-                        read(url).unwrap()
-                    } else {
-                        reqwest::blocking::get(parsed_url.unwrap())
-                            .unwrap()
-                            .bytes()
-                            .unwrap()
-                            .to_vec()
-                    };
+                    let image_bytes =
+                        if let Err(url::ParseError::RelativeUrlWithoutBase) = parsed_url {
+                            std::fs::read(url).unwrap()
+                        } else {
+                            reqwest::blocking::get(parsed_url.unwrap())
+                                .unwrap()
+                                .bytes()
+                                .unwrap()
+                                .to_vec()
+                        };
                     let image = image::load_from_memory(&image_bytes).unwrap();
                     let data = match format {
                         wgpu::TextureFormat::Rgba8Unorm => image.to_rgba8().to_vec(),
@@ -897,7 +883,6 @@ impl SlangCompiler {
             .collect::<Vec<_>>();
         let search_paths = search_paths.iter().map(|p| p.as_ptr()).collect::<Vec<_>>();
 
-        // All compiler options are available through this builder.
         let session_options = slang::CompilerOptions::default()
             .optimization(slang::OptimizationLevel::High)
             .matrix_layout_row(true);
@@ -917,11 +902,7 @@ impl SlangCompiler {
             .file_system(custom_file_system.clone());
 
         let Ok(slang_session) = self.global_slang_session.create_session(&session_desc) else {
-            // let error = self.slang_wasm_module.get_last_error();
-            // console.error(error.type + " error: " + error.message);
-            // self.diagnostics_msg += (error.type + " error: " + error.message);
-            // TODO
-            panic!();
+            panic!("Failed to create slang session");
         };
 
         let mut components: Vec<slang::ComponentType> = vec![];
@@ -937,7 +918,6 @@ impl SlangCompiler {
             }
         };
 
-        // For now, we just don't allow user to define image_main or print_main as entry point name for simplicity
         let count = user_module.entry_point_count();
         for i in 0..count {
             let name = user_module
@@ -961,15 +941,16 @@ impl SlangCompiler {
 
         let shader_reflection = linked_program.layout(0).unwrap();
         let hashed_strings = load_strings(&shader_reflection);
-        let out_code = linked_program.target_code(0).unwrap_or_else(|err| {
-            panic!("Failed to compile shader: {:?}", err.to_string())
-        }).as_slice().to_vec();
+        let out_code = linked_program
+            .target_code(0)
+            .unwrap_or_else(|err| panic!("Failed to compile shader: {:?}", err.to_string()))
+            .as_slice()
+            .to_vec();
         let out_code = String::from_utf8(out_code).unwrap();
 
         let mut entry_group_sizes = HashMap::new();
         for entry in shader_reflection.entry_points() {
             let group_size = entry.compute_thread_group_size();
-            //convert to string
             if entry.stage() == Stage::Compute {
                 entry_group_sizes.insert(entry.name().to_string(), group_size);
             }
@@ -984,8 +965,7 @@ impl SlangCompiler {
 
         let bindings =
             self.get_resource_bindings(&global_layout, &global_layout, &resource_commands);
-
-        let uniform_controllers = get_uniform_sliders(&resource_commands);
+        let uniform_controllers = get_uniform_controllers(&resource_commands);
 
         CompilationResult {
             out_code,
@@ -1018,6 +998,7 @@ fn parameter_texture_view_dimension(parameter: &VariableLayout) -> wgpu::Texture
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 enum ModelField {
     Position,
     Normal,
@@ -1027,6 +1008,7 @@ enum ModelField {
 fn is_available_in_compute(resource_command: &ResourceCommandData) -> bool {
     !matches!(resource_command, ResourceCommandData::RebindForDraw { .. })
 }
+
 fn is_available_in_graphics(parameter: &VariableLayout) -> bool {
     match parameter.ty().unwrap().kind() {
         TypeKind::Resource => matches!(
@@ -1124,15 +1106,20 @@ fn get_layout_size(resource_result_type: &slang::reflection::TypeLayout) -> u32 
             _ => panic!("Unimplemented scalar type"),
         },
         TypeKind::Vector => {
-            let count = resource_result_type.element_count().unwrap().next_power_of_two() as u32;
+            let count = resource_result_type
+                .element_count()
+                .unwrap()
+                .next_power_of_two() as u32;
             count * get_layout_size(resource_result_type.element_type_layout())
         }
         TypeKind::Struct => resource_result_type
             .fields()
             .map(|f| get_layout_size(f.type_layout()))
             .fold(0, |a, f| (a + f).div_ceil(f) * f),
-        TypeKind::Array => 
-            get_layout_size(resource_result_type.element_type_layout()) * resource_result_type.element_count().unwrap() as u32,
+        TypeKind::Array => {
+            get_layout_size(resource_result_type.element_type_layout())
+                * resource_result_type.element_count().unwrap() as u32
+        }
         ty => panic!("Unimplemented type {ty:?} for get_size"),
     }
 }
@@ -1179,8 +1166,7 @@ fn parse_call_commands(reflection: &ProgramLayout) -> Vec<CallCommand> {
                     .unwrap()
                     .trim_matches('"');
 
-                let mut resource_reflection = reflection
-                    .global_params_type_layout();
+                let mut resource_reflection = reflection.global_params_type_layout();
 
                 if matches!(resource_reflection.kind(), TypeKind::ConstantBuffer) {
                     resource_reflection = resource_reflection.element_type_layout();
@@ -1311,11 +1297,11 @@ fn get_uniform_size(shader_reflection: &ProgramLayout) -> u64 {
     round_up_to_nearest(size, 16)
 }
 
-fn get_uniform_sliders(
+fn get_uniform_controllers(
     resource_commands: &HashMap<String, ResourceCommandData>,
 ) -> Vec<UniformController> {
     let mut controllers: Vec<UniformController> = vec![];
-    for (resource_name, command_data) in resource_commands.iter() {
+    for (resource_name, command_data) in resource_commands {
         match command_data {
             ResourceCommandData::Slider {
                 default,
@@ -1362,125 +1348,5 @@ fn get_uniform_sliders(
             _ => {}
         }
     }
-
     controllers
-}
-
-fn get_uniform_update_code(uniform_controllers: &[UniformController]) -> String {
-    let mut uniform_update_code = "{\n\
-        let uniform_borrow = self.uniform_components.borrow_mut();\n\
-    "
-    .to_string();
-    for (idx, controller) in uniform_controllers.iter().enumerate() {
-        uniform_update_code += format!(
-            "{{
-    let UniformController {{
-        buffer_offset,
-        controller: _controller,
-        ..
-    }} = uniform_borrow.get({idx}).unwrap();"
-        )
-        .as_str();
-        match controller.controller {
-            UniformControllerType::Slider { .. } => {
-                uniform_update_code += "
-    let slang_compiler::UniformControllerType::Slider { value, .. } = _controller else {
-        panic!(\"Invalid generated code: Expected Slider got {:?}\", _controller);
-    };
-    let slice = [*value];";
-            }
-            UniformControllerType::ColorPick { .. } => {
-                uniform_update_code += "
-    let slang_compiler::UniformControllerType::ColorPick { value, .. } = _controller else {
-        panic!(\"Invalid generated code: Expected ColorPick got {:?}\", _controller);
-    };
-    let slice = [*value];";
-            }
-            UniformControllerType::MousePosition => {
-                uniform_update_code += "
-    let mut slice = [0.0f32; 4];
-    slice[0] = self.mouse_state.last_mouse_down_pos.x as f32;
-    slice[1] = self.mouse_state.last_mouse_down_pos.y as f32;
-    slice[2] = self.mouse_state.last_mouse_clicked_pos.x as f32;
-    slice[3] = self.mouse_state.last_mouse_clicked_pos.y as f32;
-    if self.mouse_state.is_mouse_down {
-        slice[2] = -slice[2];
-    }
-    if self.mouse_state.mouse_clicked {
-        slice[3] = -slice[3];
-    }";
-            }
-            UniformControllerType::Time => {
-                uniform_update_code += "
-    let value = web_time::Instant::now()
-        .duration_since(self.launch_time)
-        .as_secs_f32();
-    let slice = [value];";
-            }
-            UniformControllerType::DeltaTime => {
-                uniform_update_code += "
-    let slice = [self.delta_time];";
-            }
-            UniformControllerType::KeyInput { ref key } => {
-                let keycode = match key.to_lowercase().as_str() {
-                    "enter" => "Key::Named(winit::keyboard::NamedKey::Enter)".to_string(),
-                    "space" => "Key::Named(winit::keyboard::NamedKey::Space)".to_string(),
-                    "shift" => "Key::Named(winit::keyboard::NamedKey::Shift)".to_string(),
-                    "ctrl" => "Key::Named(winit::keyboard::NamedKey::Control)".to_string(),
-                    "escape" => "Key::Named(winit::keyboard::NamedKey::Escape)".to_string(),
-                    "backspace" => "Key::Named(winit::keyboard::NamedKey::Backspace)".to_string(),
-                    "tab" => "Key::Named(winit::keyboard::NamedKey::Tab)".to_string(),
-                    "arrowup" => "Key::Named(winit::keyboard::NamedKey::ArrowUp)".to_string(),
-                    "arrowdown" => "Key::Named(winit::keyboard::NamedKey::ArrowDown)".to_string(),
-                    "arrowleft" => "Key::Named(winit::keyboard::NamedKey::ArrowLeft)".to_string(),
-                    "arrowright" => "Key::Named(winit::keyboard::NamedKey::ArrowRight)".to_string(),
-                    k => format!("Key::Character(\"{}\".into())", k),
-                };
-                uniform_update_code += format!(
-                    "
-    let value = if self.keyboard_state.pressed_keys.contains(&{keycode}) {{
-        1.0f32
-    }} else {{
-        0.0f32
-    }};
-    let slice = [value];"
-                )
-                .as_str();
-            }
-        }
-        uniform_update_code += "
-    let uniform_data = bytemuck::cast_slice(&slice);
-    buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
-}\n";
-    }
-    uniform_update_code += "\n}";
-
-    uniform_update_code
-}
-
-fn main() {
-    // Tell Cargo that if the given file changes, to rerun this build script.
-    println!("cargo::rerun-if-changed=shaders");
-    println!("cargo::rerun-if-changed=build.rs");
-
-    let compiler = SlangCompiler::new();
-
-    fs::create_dir_all("compiled_shaders").unwrap();
-
-    let compilation = compiler.compile(vec!["shaders", "src/shaders"], "user.slang");
-    let serialized =
-        ron::ser::to_string_pretty(&compilation, ron::ser::PrettyConfig::default()).unwrap();
-    let mut file = File::create("compiled_shaders/compiled.ron").unwrap();
-    file.write_all(serialized.as_bytes()).unwrap();
-
-    let uniform_update_code = get_uniform_update_code(&compilation.uniform_controllers);
-    let mut file = File::create("compiled_shaders/uniform_update_code.rs").unwrap();
-    file.write_all(uniform_update_code.as_bytes()).unwrap();
-
-    let rand_float_compilation = compiler.compile(vec!["demos"], "rand_float.slang");
-    let serialized =
-        ron::ser::to_string_pretty(&rand_float_compilation, ron::ser::PrettyConfig::default())
-            .unwrap();
-    let mut file = File::create("compiled_shaders/rand_float_compiled.ron").unwrap();
-    file.write_all(serialized.as_bytes()).unwrap();
 }

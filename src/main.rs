@@ -2,15 +2,15 @@ mod compute_pipeline;
 mod draw_pipeline;
 #[cfg(not(target_arch = "wasm32"))]
 mod egui_tools;
-mod slang_compiler;
 
 use draw_pipeline::DrawPipeline;
 use rand::Rng;
 use regex::Regex;
-use slang_compiler::{
+use slang_compiler_type_definitions::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
     UniformController,
 };
+use slang_shader_macros::compile_shader;
 use wgpu::{BufferDescriptor, Extent3d, Features};
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, panic, rc::Rc, sync::Arc};
@@ -1037,16 +1037,16 @@ impl State {
         let size = window.inner_size();
 
         let compilation: CompilationResult =
-            ron::from_str(include_str!("../compiled_shaders/compiled.ron")).unwrap();
+            compile_shader!("user.slang", ["shaders", "src/shaders"]);
 
         let surface = instance.create_surface(window.clone()).unwrap();
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
 
         let mut random_pipeline = ComputePipeline::new(device.clone());
 
-        // Load randFloat shader code from the file.
+        // Load randFloat shader code using the proc macro
         let compiled_result: CompilationResult =
-            ron::from_str(include_str!("../compiled_shaders/rand_float_compiled.ron")).unwrap();
+            compile_shader!("rand_float.slang", ["demos"]);
 
         let rand_code = compiled_result.out_code;
         let rand_group_size = compiled_result
@@ -1359,8 +1359,10 @@ impl State {
             pass.set_bind_group(0, pipeline.bind_group.as_ref(), &[]);
             pass.set_pipeline(pipeline.pipeline.as_ref().unwrap());
 
+            use slang_compiler_type_definitions::CallCommandParameters;
+
             match &call_command.parameters {
-                slang_compiler::CallCommandParameters::ResourceBased(
+                CallCommandParameters::ResourceBased(
                     resource_name,
                     element_size,
                 ) => {
@@ -1390,7 +1392,7 @@ impl State {
                         work_group_size[2],
                     );
                 }
-                slang_compiler::CallCommandParameters::FixedSize(items) => {
+                CallCommandParameters::FixedSize(items) => {
                     if items.len() > 3 {
                         panic!("Too many parameters for call command");
                     }
@@ -1412,7 +1414,7 @@ impl State {
                         work_group_size[2],
                     );
                 }
-                slang_compiler::CallCommandParameters::Indirect(indirect_buffer, offset) => {
+                CallCommandParameters::Indirect(indirect_buffer, offset) => {
                     let Some(GPUResource::Buffer(resource)) =
                         self.allocated_resources.get(indirect_buffer)
                     else {
@@ -1748,7 +1750,7 @@ impl App {
                     .borrow_mut()
                     .iter_mut()
                 {
-                    use slang_compiler::UniformControllerType;
+                    use slang_compiler_type_definitions::UniformControllerType;
                     match controller {
                         UniformControllerType::Slider {
                             value, min, max, ..

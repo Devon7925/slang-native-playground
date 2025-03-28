@@ -1,11 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
+use slang_compiler_type_definitions::ResourceCommandData;
 use wgpu::{
     ColorWrites, DepthStencilState, Device, FragmentState, RenderPassDepthStencilAttachment,
     VertexState,
 };
 
-use crate::{GPUResource, slang_compiler::ResourceCommandData};
+use crate::GPUResource;
 
 pub struct DrawPipeline {
     pub device: Arc<wgpu::Device>,
