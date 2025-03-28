@@ -1015,7 +1015,7 @@ fn parse_printf_buffer(
 }
 
 impl State {
-    async fn new(window: Arc<Window>) -> State {
+    async fn new(window: Arc<Window>, compilation: CompilationResult) -> State {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions::default())
@@ -1036,17 +1036,13 @@ impl State {
 
         let size = window.inner_size();
 
-        let compilation: CompilationResult =
-            compile_shader!("user.slang", ["shaders", "src/shaders"]);
-
         let surface = instance.create_surface(window.clone()).unwrap();
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
 
         let mut random_pipeline = ComputePipeline::new(device.clone());
 
         // Load randFloat shader code using the proc macro
-        let compiled_result: CompilationResult =
-            compile_shader!("rand_float.slang", ["demos"]);
+        let compiled_result: CompilationResult = compile_shader!("rand_float.slang", ["src/shaders"]);
 
         let rand_code = compiled_result.out_code;
         let rand_group_size = compiled_result
@@ -1624,22 +1620,23 @@ impl DebugAppState {
     }
 }
 
-#[derive(Default)]
 struct App {
     state: Option<State>,
     #[cfg(target_arch = "wasm32")]
     state_receiver: Option<futures::channel::oneshot::Receiver<State>>,
     #[cfg(not(target_arch = "wasm32"))]
     debug_app: Option<DebugAppState>,
+    compilation: Option<CompilationResult>,
 }
 impl App {
-    fn new() -> Self {
+    fn new(compilation: CompilationResult) -> Self {
         Self {
             state: None,
             #[cfg(target_arch = "wasm32")]
             state_receiver: None,
             #[cfg(not(target_arch = "wasm32"))]
             debug_app: None,
+            compilation: Some(compilation),
         }
     }
 
@@ -1811,7 +1808,7 @@ impl ApplicationHandler for App {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let state = pollster::block_on(State::new(window.clone()));
+            let state = pollster::block_on(State::new(window.clone(), self.compilation.take().unwrap()));
             self.state = Some(state);
         }
 
@@ -2001,7 +1998,8 @@ fn remove_modifiers(key: Key<SmolStr>) -> Key<SmolStr> {
     }
 }
 
-fn main() {
+pub fn launch(compilation: CompilationResult) {
+    
     #[cfg(debug_assertions)]
     #[cfg(target_family = "wasm")]
     panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -2026,6 +2024,6 @@ fn main() {
     // the background.
     // event_loop.set_control_flow(ControlFlow::Wait);
 
-    let mut app = App::new();
+    let mut app = App::new(compilation);
     event_loop.run_app(&mut app).unwrap();
 }
