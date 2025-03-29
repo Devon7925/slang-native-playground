@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, time::Instant};
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use wgpu::BindGroupLayoutEntry;
@@ -74,7 +74,7 @@ pub struct ResourceCommand {
 }
 
 pub struct UniformSourceData<'a> {
-    pub launch_time: Instant,
+    pub launch_time: web_time::Instant,
     pub delta_time: f32,
     pub last_mouse_down_pos: [f32; 2],
     pub last_mouse_clicked_pos: [f32; 2],
@@ -109,6 +109,7 @@ impl UniformControllerType for UniformSlider {
         self.value.to_le_bytes().to_vec()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn render(&mut self, name: &str, ui: &mut egui::Ui) {
         ui.label(name);
         ui.add(egui::Slider::new(&mut self.value, self.min..=self.max));
@@ -126,6 +127,7 @@ impl UniformControllerType for UniformColorPick {
         self.value.iter().map(|x| x.to_le_bytes()).flatten().collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn render(&mut self, name: &str, ui: &mut egui::Ui) {
         ui.label(name);
         ui.color_edit_button_rgb(&mut self.value);

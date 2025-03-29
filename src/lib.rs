@@ -1816,8 +1816,9 @@ impl ApplicationHandler for App {
         {
             let (sender, receiver) = futures::channel::oneshot::channel();
             self.state_receiver = Some(receiver);
+            let compilation = self.compilation.take().unwrap();
             wasm_bindgen_futures::spawn_local(async move {
-                let mut state = State::new(window.clone()).await;
+                let mut state = State::new(window.clone(), compilation).await;
                 state.resize(state.window.inner_size());
                 if sender.send(state).is_err() {
                     panic!("Failed to create and send renderer!");
