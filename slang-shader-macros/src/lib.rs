@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use proc_macro::TokenStream;
 use quote::quote;
 use slang_compiler::SlangCompiler;
@@ -35,7 +37,13 @@ pub fn compile_shader(input: TokenStream) -> TokenStream {
     let compiler = SlangCompiler::new();
     
     let search_paths: Vec<String> = search_paths.iter().map(|s| s.value()).collect();
-    let search_paths = search_paths.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+    let mut search_paths = search_paths.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+
+    let this_file = file!();
+    let shaders_path = Path::new(this_file).parent().unwrap().parent().unwrap().join("shaders");
+    let shaders_path = shaders_path.canonicalize().unwrap();
+    search_paths.push(shaders_path.to_str().unwrap());
+
     let compilation_result = compiler.compile(search_paths, &shader_path);
 
     let out_code = compilation_result.out_code;

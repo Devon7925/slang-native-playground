@@ -3,6 +3,6 @@ use slang_native_playground::launch;
 use slang_shader_macros::compile_shader;
 
 fn main() {
-    let compilation: CompilationResult = compile_shader!("user.slang", ["examples/painting", "src/shaders"]);
+    let compilation: CompilationResult = compile_shader!("user.slang", ["examples/painting"]);
     launch(compilation);
 }
