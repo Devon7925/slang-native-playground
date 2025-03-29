@@ -123,7 +123,7 @@ pub struct UniformColorPick {
 #[typetag::serde]
 impl UniformControllerType for UniformColorPick {
     fn get_data(&self, _uniform_source_data: &UniformSourceData) -> Vec<u8> {
-        bytemuck::cast_vec(self.value.to_vec())
+        self.value.iter().map(|x| x.to_le_bytes()).flatten().collect()
     }
 
     fn render(&mut self, name: &str, ui: &mut egui::Ui) {
@@ -162,7 +162,7 @@ impl UniformControllerType for UniformTime {
         let value = web_time::Instant::now()
             .duration_since(uniform_source_data.launch_time)
             .as_secs_f32();
-        bytemuck::cast_vec(vec![value])
+        value.to_le_bytes().to_vec()
     }
 }
 
@@ -172,7 +172,7 @@ pub struct UniformDeltaTime;
 #[typetag::serde]
 impl UniformControllerType for UniformDeltaTime {
     fn get_data(&self, uniform_source_data: &UniformSourceData) -> Vec<u8> {
-        bytemuck::cast_vec(vec![uniform_source_data.delta_time])
+        uniform_source_data.delta_time.to_le_bytes().to_vec()
     }
 }
 
@@ -203,7 +203,7 @@ impl UniformControllerType for UniformKeyInput {
         } else {
             0.0f32
         };
-        bytemuck::cast_vec(vec![value])
+        value.to_le_bytes().to_vec()
     }
 }
 

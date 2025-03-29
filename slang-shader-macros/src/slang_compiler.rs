@@ -183,7 +183,13 @@ impl SlangCompiler {
             {
                 let module = slang_session
                     .load_module(format!("{}.slang", st).as_str())
-                    .unwrap();
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "Failed to load module {}: {:?}",
+                            st,
+                            e.to_string()
+                        )
+                    });
 
                 component_list.push(module.deref().clone());
 
