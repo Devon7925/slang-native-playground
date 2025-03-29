@@ -8,7 +8,7 @@ use rand::Rng;
 use regex::Regex;
 use slang_compiler_type_definitions::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
-    UniformController,
+    UniformController, UniformSourceData,
 };
 use slang_shader_macros::compile_shader;
 use wgpu::{BufferDescriptor, Extent3d, Features};
@@ -1042,7 +1042,8 @@ impl State {
         let mut random_pipeline = ComputePipeline::new(device.clone());
 
         // Load randFloat shader code using the proc macro
-        let compiled_result: CompilationResult = compile_shader!("rand_float.slang", ["src/shaders"]);
+        let compiled_result: CompilationResult =
+            compile_shader!("rand_float.slang", ["src/shaders"]);
 
         let rand_code = compiled_result.out_code;
         let rand_group_size = compiled_result
@@ -1334,7 +1335,26 @@ impl State {
         self.delta_time = frame_time.as_secs_f32();
         self.last_frame_time = now;
 
-        include!("../compiled_shaders/uniform_update_code.rs");
+        let uniform_source_data = UniformSourceData {
+            launch_time: self.launch_time,
+            delta_time: self.delta_time,
+            last_mouse_down_pos: [self.mouse_state.last_mouse_down_pos.x as f32, self.mouse_state.last_mouse_down_pos.y as f32],
+            last_mouse_clicked_pos: [self.mouse_state.last_mouse_clicked_pos.x as f32, self.mouse_state.last_mouse_clicked_pos.y as f32],
+            mouse_down: self.mouse_state.is_mouse_down,
+            mouse_clicked: self.mouse_state.mouse_clicked,
+            pressed_keys: &self.keyboard_state.pressed_keys,
+        };
+
+        for UniformController {
+            buffer_offset,
+            controller,
+            ..
+        } in self.uniform_components.borrow().iter() {
+            let slice = controller.get_data(&uniform_source_data);
+            let uniform_data = bytemuck::cast_slice(&slice);
+            buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
+        }
+        
         self.queue.write_buffer(uniform_input, 0, &buffer_data);
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -1358,10 +1378,7 @@ impl State {
             use slang_compiler_type_definitions::CallCommandParameters;
 
             match &call_command.parameters {
-                CallCommandParameters::ResourceBased(
-                    resource_name,
-                    element_size,
-                ) => {
+                CallCommandParameters::ResourceBased(resource_name, element_size) => {
                     let resource = self.allocated_resources.get(resource_name).unwrap();
                     let size = match resource {
                         GPUResource::Texture(texture) => [
@@ -1747,25 +1764,7 @@ impl App {
                     .borrow_mut()
                     .iter_mut()
                 {
-                    use slang_compiler_type_definitions::UniformControllerType;
-                    match controller {
-                        UniformControllerType::Slider {
-                            value, min, max, ..
-                        } => {
-                            ui.label(name.as_str());
-                            ui.add(egui::Slider::new(value, *min..=*max));
-                        }
-                        UniformControllerType::ColorPick { value, .. } => {
-                            ui.label(name.as_str());
-                            ui.color_edit_button_rgb(value);
-                        }
-                        UniformControllerType::MousePosition
-                        | UniformControllerType::Time
-                        | UniformControllerType::DeltaTime
-                        | UniformControllerType::KeyInput { .. } => {
-                            // do nothing for these types as they are internally managed
-                        }
-                    }
+                    controller.render(name, ui);
                 }
             });
 
@@ -1808,7 +1807,8 @@ impl ApplicationHandler for App {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let state = pollster::block_on(State::new(window.clone(), self.compilation.take().unwrap()));
+            let state =
+                pollster::block_on(State::new(window.clone(), self.compilation.take().unwrap()));
             self.state = Some(state);
         }
 
@@ -1999,7 +1999,6 @@ fn remove_modifiers(key: Key<SmolStr>) -> Key<SmolStr> {
 }
 
 pub fn launch(compilation: CompilationResult) {
-    
     #[cfg(debug_assertions)]
     #[cfg(target_family = "wasm")]
     panic::set_hook(Box::new(console_error_panic_hook::hook));

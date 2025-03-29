@@ -12,7 +12,8 @@ use slang::{
 };
 use slang_compiler_type_definitions::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
-    UniformController, UniformControllerType,
+    UniformColorPick, UniformController, UniformDeltaTime, UniformKeyInput,
+    UniformMousePosition, UniformSlider, UniformTime,
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -93,7 +94,7 @@ impl slang::FileSystem for CustomFileSystem {
 
             // try to get token from GITHUB_TOKEN file in repo root if possible
             let token = std::fs::read_to_string("GITHUB_TOKEN");
-            
+
             if let Ok(token) = token {
                 request = request.header("Authorization", format!("token {}", token));
             };
@@ -1312,38 +1313,38 @@ fn get_uniform_controllers(
             } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::Slider {
+                controller: Box::new(UniformSlider {
                     value: *default,
                     min: *min,
                     max: *max,
-                },
+                }),
             }),
             ResourceCommandData::ColorPick {
                 default, offset, ..
             } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::ColorPick { value: *default },
+                controller: Box::new(UniformColorPick { value: *default }),
             }),
             ResourceCommandData::MousePosition { offset } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::MousePosition,
+                controller: Box::new(UniformMousePosition),
             }),
             ResourceCommandData::Time { offset } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::Time,
+                controller: Box::new(UniformTime),
             }),
             ResourceCommandData::DeltaTime { offset } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::DeltaTime,
+                controller: Box::new(UniformDeltaTime),
             }),
             ResourceCommandData::KeyInput { key, offset } => controllers.push(UniformController {
                 name: resource_name.clone(),
                 buffer_offset: *offset,
-                controller: UniformControllerType::KeyInput { key: key.clone() },
+                controller: Box::new(UniformKeyInput { key: key.clone() }),
             }),
             _ => {}
         }
