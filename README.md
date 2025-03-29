@@ -1,8 +1,8 @@
 # Slang Native Playground
 
-A project to allow Slang playground shaders to run outside of a web environment. Your user shader can be set in `shaders/user.slang`. It bundles shaders in compilation for easy deployment/sharing.
+A project to allow Slang playground shaders to run outside of a web environment. It bundles shaders in compilation for easy deployment/sharing.
 
-Use should be as easy as cloning and running `cargo run`.
+This is a library. See [slang-native-playground-example](https://github.com/Devon7925/slang-native-playground-example) for usage. Note `imageMain` and `printMain` are only available from files named `user.slang`.
 
 Depends on [slang-rs](https://github.com/FloatyMonkey/slang-rs). See that repo if it is having trouble recognizing your version of Slang.
 
@@ -100,23 +100,12 @@ If you have rate limit issues you can create a github personal access token and 
 
 ## Examples
 
-There are examples of use of the extra features in the `examples` folder. For single files, replace `user.slang` with their contents. For folders, replace the whole contents of `shaders/` with their contents.
+There are examples of use of the extra features in the `examples` folder. These can be run using `cargo run --example`. For example `cargo run --example cube_raster`.
+
 | Name | Description |
 |------|--------|
-| `cube_raster.slang` | Textured cube rasterizer with basic lighting |
-| `free_flight_camera.slang` | A rasterizer of the Utah Teacup with keyboard control for the camera |
-| `painting.slang` | A simple painting app demonstrating storage textures and indirect dispatch |
-| `voxels/` | A voxel rendering engine with simple falling sand physics |
-
-## Web Build
-
-This app supports building for web. To do so run:
-
-```bash
-cargo build --target wasm32-unknown-unknown
-wasm-bindgen --out-dir target/generated/ --web target/wasm32-unknown-unknown/debug/slang-native-playground.wasm 
-```
-
-The web build should then be accessible from `index.html`.
-
+| `cube_raster` | Textured cube rasterizer with basic lighting |
+| `free_flight_camera` | A rasterizer of the Utah Teacup with keyboard control for the camera |
+| `painting` | A simple painting app demonstrating storage textures and indirect dispatch |
+| `voxels` | A voxel rendering engine with simple falling sand physics |
 
