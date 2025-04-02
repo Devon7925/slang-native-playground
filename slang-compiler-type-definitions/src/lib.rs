@@ -40,31 +40,6 @@ pub enum ResourceCommandData {
     RebindForDraw {
         original_resource: String,
     },
-    Slider {
-        default: f32,
-        min: f32,
-        max: f32,
-        element_size: usize,
-        offset: usize,
-    },
-    ColorPick {
-        default: [f32; 3],
-        element_size: usize,
-        offset: usize,
-    },
-    MousePosition {
-        offset: usize,
-    },
-    Time {
-        offset: usize,
-    },
-    DeltaTime {
-        offset: usize,
-    },
-    KeyInput {
-        key: String,
-        offset: usize,
-    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -81,6 +56,20 @@ pub struct UniformSourceData<'a> {
     pub mouse_down: bool,
     pub mouse_clicked: bool,
     pub pressed_keys: &'a HashSet<Key>,
+}
+
+impl<'a> UniformSourceData<'a> {
+    pub fn new(keys: &'a HashSet<Key>) -> Self {
+        Self {
+            launch_time: web_time::Instant::now(),
+            delta_time: 0.0,
+            last_mouse_down_pos: [0.0, 0.0],
+            last_mouse_clicked_pos: [0.0, 0.0],
+            mouse_down: false,
+            mouse_clicked: false,
+            pressed_keys: keys,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]

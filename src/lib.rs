@@ -145,6 +145,7 @@ async fn process_resource_commands(
     resource_bindings: &HashMap<String, wgpu::BindGroupLayoutEntry>,
     resource_commands: &HashMap<String, ResourceCommandData>,
     resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
+    uniform_controllers: &Vec<UniformController>,
     random_pipeline: &mut ComputePipeline,
     uniform_size: u64,
 ) -> HashMap<String, GPUResource> {
@@ -647,81 +648,25 @@ async fn process_resource_commands(
                         )
                     }
                 }
-                ResourceCommandData::Slider {
-                    default,
-                    element_size,
-                    offset,
-                    ..
-                } => {
-                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
-                    else {
-                        panic!("cannot get uniforms")
-                    };
-                    // Initialize the buffer with zeros.
-                    let buffer_default = if element_size == 4 {
-                        default.to_le_bytes()
-                    } else {
-                        panic!("Unsupported float size for slider")
-                    };
-                    queue.write_buffer(buffer, offset as u64, &buffer_default);
-                }
-                ResourceCommandData::ColorPick {
-                    default,
-                    element_size,
-                    offset,
-                } => {
-                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
-                    else {
-                        panic!("cannot get uniforms")
-                    };
-                    // Initialize the buffer with zeros.
-                    let buffer_default = if element_size == 4 {
-                        bytemuck::cast_slice(&default)
-                    } else {
-                        panic!("Unsupported float size for color pick")
-                    };
-                    queue.write_buffer(buffer, offset as u64, buffer_default);
-                }
-                ResourceCommandData::MousePosition { offset } => {
-                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
-                    else {
-                        panic!("cannot get uniforms")
-                    };
-                    // Initialize the buffer with zeros.
-                    let buffer_default = [0u8; 16];
-                    queue.write_buffer(buffer, offset as u64, &buffer_default);
-                }
-                ResourceCommandData::Time { offset } => {
-                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
-                    else {
-                        panic!("cannot get uniforms")
-                    };
-                    // Initialize the buffer with current time.
-                    let time = 0.0f32;
-                    let buffer_default = time.to_le_bytes();
-                    queue.write_buffer(buffer, offset as u64, &buffer_default);
-                }
-                ResourceCommandData::DeltaTime { offset } => {
-                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
-                    else {
-                        panic!("cannot get uniforms")
-                    };
-                    // Initialize the buffer with zeros.
-                    let buffer_default = 0f32.to_le_bytes();
-                    queue.write_buffer(buffer, offset as u64, &buffer_default);
-                }
-                ResourceCommandData::KeyInput { offset, .. } => {
-                    let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
-                    else {
-                        panic!("cannot get uniforms")
-                    };
-                    // Initialize with key released state (0.0)
-                    let value = 0.0f32;
-                    let slice = [value];
-                    let uniform_data = bytemuck::cast_slice(&slice);
-                    queue.write_buffer(buffer, offset as u64, uniform_data);
-                }
             }
+        }
+    }
+
+    if !uniform_controllers.is_empty() {
+        let keys = HashSet::new();
+        let uniform_source_data = UniformSourceData::new(&keys);
+        let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
+        else {
+            panic!("cannot get uniforms")
+        };
+        for UniformController {
+            controller,
+            buffer_offset,
+            ..
+        } in uniform_controllers {
+            // Initialize the uniform data.
+            let buffer_default = controller.get_data(&uniform_source_data);
+            queue.write_buffer(buffer, *buffer_offset as u64, &buffer_default);
         }
     }
 
@@ -1071,6 +1016,7 @@ impl State {
             &compilation.bindings,
             &compilation.resource_commands,
             &resource_metadata,
+            &compilation.uniform_controllers,
             &mut random_pipeline,
             compilation.uniform_size,
         )

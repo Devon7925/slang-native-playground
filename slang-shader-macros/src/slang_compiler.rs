@@ -12,8 +12,8 @@ use slang::{
 };
 use slang_compiler_type_definitions::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
-    UniformColorPick, UniformController, UniformDeltaTime, UniformKeyInput,
-    UniformMousePosition, UniformSlider, UniformTime,
+    UniformColorPick, UniformController, UniformDeltaTime, UniformKeyInput, UniformMousePosition,
+    UniformSlider, UniformTime,
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -184,11 +184,7 @@ impl SlangCompiler {
                 let module = slang_session
                     .load_module(format!("{}.slang", st).as_str())
                     .unwrap_or_else(|e| {
-                        panic!(
-                            "Failed to load module {}: {:?}",
-                            st,
-                            e.to_string()
-                        )
+                        panic!("Failed to load module {}: {:?}", st, e.to_string())
                     });
 
                 component_list.push(module.deref().clone());
@@ -763,7 +759,42 @@ impl SlangCompiler {
                             .trim_matches('"')
                             .to_string(),
                     })
-                } else if playground_attribute_name == "SLIDER" {
+                } else {
+                    None
+                };
+
+                if let Some(command) = command {
+                    commands.insert(parameter.variable().unwrap().name().to_string(), command);
+                }
+            }
+        }
+
+        commands
+    }
+    fn uniform_controllers_from_attributes(
+        &self,
+        reflection: &TypeLayout,
+        top_level_reflection: &TypeLayout,
+    ) -> Vec<UniformController> {
+        if matches!(reflection.kind(), TypeKind::ConstantBuffer) {
+            return self.uniform_controllers_from_attributes(
+                reflection.element_type_layout(),
+                top_level_reflection,
+            );
+        }
+
+        let mut commands: Vec<UniformController> = Vec::new();
+
+        for parameter in reflection.fields() {
+            for attribute in parameter.variable().unwrap().user_attributes() {
+                let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
+                else {
+                    continue;
+                };
+                use slang_compiler_type_definitions::UniformControllerType;
+                let command: Option<Box<dyn UniformControllerType>> = if playground_attribute_name
+                    == "SLIDER"
+                {
                     if parameter.ty().unwrap().kind() != TypeKind::Scalar
                         || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
                         || parameter.category_by_index(0) != ParameterCategory::Uniform
@@ -774,13 +805,11 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::Slider {
-                        default: attribute.argument_value_float(0).unwrap(),
+                    Some(Box::new(UniformSlider {
+                        value: attribute.argument_value_float(0).unwrap(),
                         min: attribute.argument_value_float(1).unwrap(),
                         max: attribute.argument_value_float(2).unwrap(),
-                        element_size: parameter.type_layout().size(ParameterCategory::Uniform),
-                        offset: parameter.offset(ParameterCategory::Uniform),
-                    })
+                    }))
                 } else if playground_attribute_name == "COLOR_PICK" {
                     if parameter.ty().unwrap().kind() != TypeKind::Vector
                         || parameter.ty().unwrap().element_count() <= 2
@@ -795,16 +824,13 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::ColorPick {
-                        default: [
+                    Some(Box::new(UniformColorPick {
+                        value: [
                             attribute.argument_value_float(0).unwrap(),
                             attribute.argument_value_float(1).unwrap(),
                             attribute.argument_value_float(2).unwrap(),
                         ],
-                        element_size: parameter.type_layout().size(ParameterCategory::Uniform)
-                            / parameter.ty().unwrap().element_count(),
-                        offset: parameter.offset(ParameterCategory::Uniform),
-                    })
+                    }))
                 } else if playground_attribute_name == "MOUSE_POSITION" {
                     if parameter.ty().unwrap().kind() != TypeKind::Vector
                         || parameter.ty().unwrap().element_count() <= 3
@@ -819,9 +845,7 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::MousePosition {
-                        offset: parameter.offset(ParameterCategory::Uniform),
-                    })
+                    Some(Box::new(UniformMousePosition))
                 } else if playground_attribute_name == "KEY_INPUT" {
                     if parameter.ty().unwrap().kind() != TypeKind::Scalar
                         || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
@@ -833,14 +857,13 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::KeyInput {
+                    Some(Box::new(UniformKeyInput {
                         key: attribute
                             .argument_value_string(0)
                             .unwrap()
                             .trim_matches('"')
                             .to_string(),
-                        offset: parameter.offset(ParameterCategory::Uniform),
-                    })
+                    }))
                 } else if playground_attribute_name == "TIME" {
                     if parameter.ty().unwrap().kind() != TypeKind::Scalar
                         || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
@@ -852,9 +875,7 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::Time {
-                        offset: parameter.offset(ParameterCategory::Uniform),
-                    })
+                    Some(Box::new(UniformTime))
                 } else if playground_attribute_name == "DELTA_TIME" {
                     if parameter.ty().unwrap().kind() != TypeKind::Scalar
                         || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
@@ -866,15 +887,17 @@ impl SlangCompiler {
                         )
                     }
 
-                    Some(ResourceCommandData::DeltaTime {
-                        offset: parameter.offset(ParameterCategory::Uniform),
-                    })
+                    Some(Box::new(UniformDeltaTime))
                 } else {
                     None
                 };
 
                 if let Some(command) = command {
-                    commands.insert(parameter.variable().unwrap().name().to_string(), command);
+                    commands.push(UniformController {
+                        name: parameter.variable().unwrap().name().to_string(),
+                        buffer_offset: parameter.offset(ParameterCategory::Uniform),
+                        controller: command,
+                    });
                 }
             }
         }
@@ -967,12 +990,13 @@ impl SlangCompiler {
 
         let resource_commands =
             self.resource_commands_from_attributes(&global_layout, &global_layout);
+        let uniform_controllers =
+            self.uniform_controllers_from_attributes(&global_layout, &global_layout);
         let call_commands = parse_call_commands(&shader_reflection);
         let draw_commands = parse_draw_commands(&shader_reflection);
 
         let bindings =
             self.get_resource_bindings(&global_layout, &global_layout, &resource_commands);
-        let uniform_controllers = get_uniform_controllers(&resource_commands);
 
         CompilationResult {
             out_code,
@@ -1302,58 +1326,4 @@ fn get_uniform_size(shader_reflection: &ProgramLayout) -> u64 {
     }
 
     round_up_to_nearest(size, 16)
-}
-
-fn get_uniform_controllers(
-    resource_commands: &HashMap<String, ResourceCommandData>,
-) -> Vec<UniformController> {
-    let mut controllers: Vec<UniformController> = vec![];
-    for (resource_name, command_data) in resource_commands {
-        match command_data {
-            ResourceCommandData::Slider {
-                default,
-                min,
-                max,
-                offset,
-                ..
-            } => controllers.push(UniformController {
-                name: resource_name.clone(),
-                buffer_offset: *offset,
-                controller: Box::new(UniformSlider {
-                    value: *default,
-                    min: *min,
-                    max: *max,
-                }),
-            }),
-            ResourceCommandData::ColorPick {
-                default, offset, ..
-            } => controllers.push(UniformController {
-                name: resource_name.clone(),
-                buffer_offset: *offset,
-                controller: Box::new(UniformColorPick { value: *default }),
-            }),
-            ResourceCommandData::MousePosition { offset } => controllers.push(UniformController {
-                name: resource_name.clone(),
-                buffer_offset: *offset,
-                controller: Box::new(UniformMousePosition),
-            }),
-            ResourceCommandData::Time { offset } => controllers.push(UniformController {
-                name: resource_name.clone(),
-                buffer_offset: *offset,
-                controller: Box::new(UniformTime),
-            }),
-            ResourceCommandData::DeltaTime { offset } => controllers.push(UniformController {
-                name: resource_name.clone(),
-                buffer_offset: *offset,
-                controller: Box::new(UniformDeltaTime),
-            }),
-            ResourceCommandData::KeyInput { key, offset } => controllers.push(UniformController {
-                name: resource_name.clone(),
-                buffer_offset: *offset,
-                controller: Box::new(UniformKeyInput { key: key.clone() }),
-            }),
-            _ => {}
-        }
-    }
-    controllers
 }
