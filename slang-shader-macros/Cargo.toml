@@ -10,7 +10,7 @@ proc-macro = true
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
-slang = { git = "https://github.com/Devon7925/slang-rs" }
+slang-reflector = { git="https://github.com/Devon7925/slang-reflector.git" }
 image = "0.25.6"
 reqwest = { version = "0.12.15", features = ["blocking"] }
 url = "2.4"

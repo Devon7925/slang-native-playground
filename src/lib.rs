@@ -655,15 +655,15 @@ async fn process_resource_commands(
     if !uniform_controllers.is_empty() {
         let keys = HashSet::new();
         let uniform_source_data = UniformSourceData::new(&keys);
-        let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput")
-        else {
+        let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput") else {
             panic!("cannot get uniforms")
         };
         for UniformController {
             controller,
             buffer_offset,
             ..
-        } in uniform_controllers {
+        } in uniform_controllers
+        {
             // Initialize the uniform data.
             let buffer_default = controller.get_data(&uniform_source_data);
             queue.write_buffer(buffer, *buffer_offset as u64, &buffer_default);
@@ -1284,8 +1284,14 @@ impl State {
         let uniform_source_data = UniformSourceData {
             launch_time: self.launch_time,
             delta_time: self.delta_time,
-            last_mouse_down_pos: [self.mouse_state.last_mouse_down_pos.x as f32, self.mouse_state.last_mouse_down_pos.y as f32],
-            last_mouse_clicked_pos: [self.mouse_state.last_mouse_clicked_pos.x as f32, self.mouse_state.last_mouse_clicked_pos.y as f32],
+            last_mouse_down_pos: [
+                self.mouse_state.last_mouse_down_pos.x as f32,
+                self.mouse_state.last_mouse_down_pos.y as f32,
+            ],
+            last_mouse_clicked_pos: [
+                self.mouse_state.last_mouse_clicked_pos.x as f32,
+                self.mouse_state.last_mouse_clicked_pos.y as f32,
+            ],
             mouse_down: self.mouse_state.is_mouse_down,
             mouse_clicked: self.mouse_state.mouse_clicked,
             pressed_keys: &self.keyboard_state.pressed_keys,
@@ -1295,12 +1301,14 @@ impl State {
             buffer_offset,
             controller,
             ..
-        } in self.uniform_components.borrow().iter() {
+        } in self.uniform_components.borrow().iter()
+        {
             let slice = controller.get_data(&uniform_source_data);
             let uniform_data = bytemuck::cast_slice(&slice);
-            buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())].copy_from_slice(uniform_data);
+            buffer_data[*buffer_offset..(buffer_offset + uniform_data.len())]
+                .copy_from_slice(uniform_data);
         }
-        
+
         self.queue.write_buffer(uniform_input, 0, &buffer_data);
 
         let mut encoder = self.device.create_command_encoder(&Default::default());

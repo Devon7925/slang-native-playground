@@ -1,19 +1,18 @@
+use slang_compiler_type_definitions::{
+    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
+    UniformColorPick, UniformController, UniformDeltaTime, UniformKeyInput, UniformMousePosition,
+    UniformSlider, UniformTime,
+};
+use slang_reflector::{
+    BoundParameter, BoundResource, EntrypointReflection, GlobalSession, ProgramLayoutReflector,
+    ProgramReflection, ResourceAccess, ScalarType, TextureType, UserAttributeParameter,
+    VariableReflection, VariableReflectionType,
+};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     ops::Deref,
     rc::Rc,
-};
-
-use slang::{
-    GlobalSession, ParameterCategory, ProgramLayout, ResourceAccess, ResourceShape, ScalarType,
-    Stage, TypeKind,
-    reflection::{TypeLayout, VariableLayout},
-};
-use slang_compiler_type_definitions::{
-    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
-    UniformColorPick, UniformController, UniformDeltaTime, UniformKeyInput, UniformMousePosition,
-    UniformSlider, UniformTime,
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -61,8 +60,8 @@ impl CustomFileSystem {
     }
 }
 
-impl slang::FileSystem for CustomFileSystem {
-    fn load_file(&self, path: &str) -> slang::Result<slang::Blob> {
+impl slang_reflector::FileSystem for CustomFileSystem {
+    fn load_file(&self, path: &str) -> slang_reflector::Result<slang_reflector::Blob> {
         let mut path = path.to_string();
 
         // Remove automatically added path prefix for github imports
@@ -74,7 +73,9 @@ impl slang::FileSystem for CustomFileSystem {
             // Use git api to get files ex. "https://api.github.com/repos/shader-slang/slang-playground/contents/example.slang"
             let parts: Vec<&str> = git_path.split('/').collect();
             if parts.len() < 3 {
-                return Err(slang::Error::Blob(slang::Blob::from("Invalid github path")));
+                return Err(slang_reflector::Error::Blob(slang_reflector::Blob::from(
+                    "Invalid github path",
+                )));
             }
             let user = parts[0];
             let repo = parts[1];
@@ -88,7 +89,9 @@ impl slang::FileSystem for CustomFileSystem {
             let client = reqwest::blocking::Client::builder()
                 .user_agent("slang-playground")
                 .build()
-                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+                .map_err(|e| {
+                    slang_reflector::Error::Blob(slang_reflector::Blob::from(e.to_string()))
+                })?;
 
             let mut request = client.get(&url);
 
@@ -102,7 +105,9 @@ impl slang::FileSystem for CustomFileSystem {
             let response = request
                 .header("Accept", "application/vnd.github.v3.raw")
                 .send()
-                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+                .map_err(|e| {
+                    slang_reflector::Error::Blob(slang_reflector::Blob::from(e.to_string()))
+                })?;
 
             if !response.status().is_success() {
                 if response.status() == 403 {
@@ -112,27 +117,25 @@ impl slang::FileSystem for CustomFileSystem {
                     );
                 }
 
-                return Err(slang::Error::Blob(slang::Blob::from(format!(
-                    "Failed to get file from github: {}",
-                    response.status()
-                ))));
+                return Err(slang_reflector::Error::Blob(slang_reflector::Blob::from(
+                    format!("Failed to get file from github: {}", response.status()),
+                )));
             }
 
-            let response = response
-                .text()
-                .map_err(|e| slang::Error::Blob(slang::Blob::from(e.to_string())))?;
+            let response = response.text().map_err(|e| {
+                slang_reflector::Error::Blob(slang_reflector::Blob::from(e.to_string()))
+            })?;
             self.used_files.borrow_mut().insert(path.clone());
-            return Ok(slang::Blob::from(response.into_bytes()));
+            return Ok(slang_reflector::Blob::from(response.into_bytes()));
         } else {
             match std::fs::read(&path) {
                 Ok(bytes) => {
                     self.used_files.borrow_mut().insert(path);
-                    Ok(slang::Blob::from(bytes))
+                    Ok(slang_reflector::Blob::from(bytes))
                 }
-                Err(e) => Err(slang::Error::Blob(slang::Blob::from(format!(
-                    "Failed to read file: {}",
-                    e
-                )))),
+                Err(e) => Err(slang_reflector::Error::Blob(slang_reflector::Blob::from(
+                    format!("Failed to read file: {}", e),
+                ))),
             }
         }
     }
@@ -140,7 +143,7 @@ impl slang::FileSystem for CustomFileSystem {
 
 impl SlangCompiler {
     pub fn new() -> Self {
-        let global_slang_session = slang::GlobalSession::new().unwrap();
+        let global_slang_session = slang_reflector::GlobalSession::new().unwrap();
         SlangCompiler {
             global_slang_session,
         }
@@ -148,9 +151,9 @@ impl SlangCompiler {
 
     fn add_components(
         &self,
-        slang_session: &slang::Session,
+        slang_session: &slang_reflector::Session,
         used_files: impl IntoIterator<Item = String>,
-        component_list: &mut Vec<slang::ComponentType>,
+        component_list: &mut Vec<slang_reflector::ComponentType>,
     ) {
         for imported_file in used_files {
             let module = slang_session
@@ -200,56 +203,52 @@ impl SlangCompiler {
         ShaderType::iter().any(|st| st.get_entry_point_name() == entry_point_name)
     }
 
-    fn get_binding_descriptor(
-        &self,
-        index: u32,
-        reflection: &TypeLayout,
-        program_reflection: &TypeLayout,
-        parameter: &slang::reflection::VariableLayout,
-    ) -> Option<wgpu::BindingType> {
-        let binding_type = program_reflection
-            .descriptor_set_descriptor_range_type(0, parameter.binding_index() as i64);
-
-        match binding_type {
-            slang::BindingType::Texture => Some(wgpu::BindingType::Texture {
+    fn get_binding_descriptor(&self, parameter: &BoundResource) -> Option<wgpu::BindingType> {
+        match parameter {
+            BoundResource::Texture {
+                tex_type,
+                resource_access: ResourceAccess::None | ResourceAccess::Read,
+                ..
+            } => Some(wgpu::BindingType::Texture {
                 multisampled: false,
                 sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: parameter_texture_view_dimension(parameter),
+                view_dimension: parameter_texture_view_dimension(tex_type),
             }),
-            slang::BindingType::MutableTeture => {
-                let format = reflection.binding_range_image_format(index as i64);
-                Some(wgpu::BindingType::StorageTexture {
-                    access: match parameter.ty().unwrap().resource_access() {
-                        slang::ResourceAccess::Read => wgpu::StorageTextureAccess::ReadOnly,
-                        slang::ResourceAccess::ReadWrite => wgpu::StorageTextureAccess::ReadWrite,
-                        slang::ResourceAccess::Write => wgpu::StorageTextureAccess::WriteOnly,
-                        _ => panic!("Invalid resource access"),
-                    },
-                    format: get_wgpu_format_from_slang_format(
-                        format,
-                        parameter.ty().unwrap().resource_result_type(),
-                    ),
-                    view_dimension: parameter_texture_view_dimension(parameter),
-                })
-            }
-            slang::BindingType::ConstantBuffer => Some(wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
+            BoundResource::Texture {
+                tex_type,
+                resource_result,
+                format,
+                resource_access,
+            } => Some(wgpu::BindingType::StorageTexture {
+                access: match resource_access {
+                    slang_reflector::ResourceAccess::Read => wgpu::StorageTextureAccess::ReadOnly,
+                    slang_reflector::ResourceAccess::ReadWrite => {
+                        wgpu::StorageTextureAccess::ReadWrite
+                    }
+                    slang_reflector::ResourceAccess::Write => wgpu::StorageTextureAccess::WriteOnly,
+                    _ => panic!("Invalid resource access"),
+                },
+                format: get_wgpu_format_from_slang_format(format, resource_result),
+                view_dimension: parameter_texture_view_dimension(tex_type),
             }),
-            slang::BindingType::MutableTypedBuffer | slang::BindingType::MutableRawBuffer => {
-                Some(wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                })
-            }
-            slang::BindingType::RawBuffer => Some(wgpu::BindingType::Buffer {
+            BoundResource::StructuredBuffer {
+                resource_access: slang_reflector::ResourceAccess::Read,
+                ..
+            } => Some(wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
                 has_dynamic_offset: false,
                 min_binding_size: None,
             }),
-            slang::BindingType::Sampler => Some(wgpu::BindingType::Sampler(
+            BoundResource::StructuredBuffer {
+                resource_access:
+                    slang_reflector::ResourceAccess::Write | slang_reflector::ResourceAccess::ReadWrite,
+                ..
+            } => Some(wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            }),
+            BoundResource::Sampler => Some(wgpu::BindingType::Sampler(
                 wgpu::SamplerBindingType::NonFiltering,
             )),
             a => {
@@ -261,54 +260,46 @@ impl SlangCompiler {
 
     fn get_resource_bindings(
         &self,
-        reflection: &TypeLayout,
-        top_level_reflection: &TypeLayout,
+        reflection: &ProgramReflection,
         resource_commands: &HashMap<String, ResourceCommandData>,
     ) -> HashMap<String, wgpu::BindGroupLayoutEntry> {
-        if matches!(reflection.kind(), TypeKind::ConstantBuffer) {
-            return self.get_resource_bindings(
-                reflection.element_type_layout(),
-                top_level_reflection,
-                resource_commands,
-            );
-        }
-
         let mut resource_descriptors = HashMap::new();
         let mut uniform_input = false;
-        for (parameter_idx, parameter) in reflection.fields().enumerate() {
-            let name = parameter.variable().unwrap().name().to_string();
-            if parameter.category() == ParameterCategory::Uniform {
+        for VariableReflection {
+            name,
+            reflection_type,
+            ..
+        } in reflection.variables.iter()
+        {
+            let BoundParameter::Resource {
+                resource,
+                binding_index,
+            } = reflection_type
+            else {
                 uniform_input = true;
                 continue;
-            }
+            };
 
-            let offset = reflection.field_binding_range_offset(parameter_idx as i64);
-
-            let resource_info = self.get_binding_descriptor(
-                offset as u32,
-                &reflection,
-                &top_level_reflection,
-                parameter,
-            );
+            let resource_info = self.get_binding_descriptor(resource);
             let mut visibility = wgpu::ShaderStages::NONE;
             if resource_commands
-                .get(&name)
+                .get(name)
                 .map(is_available_in_compute)
                 .unwrap_or(true)
             {
                 visibility |= wgpu::ShaderStages::COMPUTE;
             }
-            if is_available_in_graphics(parameter) {
+            if is_available_in_graphics(resource) {
                 visibility |= wgpu::ShaderStages::VERTEX_FRAGMENT;
             }
             let binding = wgpu::BindGroupLayoutEntry {
                 ty: resource_info.unwrap(),
-                binding: parameter.binding_index(),
+                binding: *binding_index,
                 visibility,
                 count: None,
             };
 
-            resource_descriptors.insert(name, binding);
+            resource_descriptors.insert(name.clone(), binding);
         }
         if uniform_input {
             resource_descriptors.insert(
@@ -331,138 +322,135 @@ impl SlangCompiler {
 
     fn resource_commands_from_attributes(
         &self,
-        reflection: &TypeLayout,
-        top_level_reflection: &TypeLayout,
+        reflection: &Vec<VariableReflection>,
     ) -> HashMap<String, ResourceCommandData> {
-        if matches!(reflection.kind(), TypeKind::ConstantBuffer) {
-            return self.resource_commands_from_attributes(
-                reflection.element_type_layout(),
-                top_level_reflection,
-            );
-        }
-
         let mut commands: HashMap<String, ResourceCommandData> = HashMap::new();
 
-        for (parameter_idx, parameter) in reflection.fields().enumerate() {
-            let offset = reflection.field_binding_range_offset(parameter_idx as i64);
-            for attribute in parameter.variable().unwrap().user_attributes() {
-                let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
-                else {
+        for VariableReflection {
+            reflection_type,
+            name,
+            user_attributes,
+        } in reflection
+        {
+            let BoundParameter::Resource { resource, .. } = reflection_type else {
+                continue;
+            };
+            for attribute in user_attributes {
+                let Some(playground_attribute_name) = attribute.name.strip_prefix("playground_") else {
                     continue;
                 };
                 let command = if playground_attribute_name == "ZEROS" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Resource
-                        || parameter.ty().unwrap().resource_shape()
-                            != ResourceShape::SlangStructuredBuffer
-                    {
+                    let BoundResource::StructuredBuffer {
+                        resource_result: element_type,
+                        ..
+                    } = resource
+                    else {
                         panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
-                            parameter.variable().unwrap().name()
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports buffers"
                         )
-                    }
-                    let count = attribute.argument_value_int(0).unwrap();
-                    if count < 0 {
+                    };
+                    let [UserAttributeParameter::Int(count)] = attribute.parameters[..] else {
                         panic!(
-                            "{playground_attribute_name} count for {} cannot have negative size",
-                            parameter.variable().unwrap().name()
+                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
                         )
-                    }
+                    };
+                    assert!(
+                        count >= 0,
+                        "{playground_attribute_name} count for {name} cannot have negative size",
+                    );
                     Some(ResourceCommandData::Zeros {
                         count: count as u32,
-                        element_size: get_layout_size(
-                            parameter.type_layout().element_type_layout(),
-                        ),
+                        element_size: element_type.get_size(),
                     })
                 } else if playground_attribute_name == "SAMPLER" {
-                    if parameter.ty().unwrap().kind() != TypeKind::SamplerState {
+                    if !matches!(resource, BoundResource::Sampler,) {
                         panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports samplers",
-                            parameter.variable().unwrap().name()
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports samplers",
                         )
                     }
                     Some(ResourceCommandData::Sampler)
                 } else if playground_attribute_name == "RAND" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Resource
-                        || parameter.ty().unwrap().resource_shape()
-                            != ResourceShape::SlangStructuredBuffer
-                    {
+                    assert!(
+                        matches!(resource, BoundResource::StructuredBuffer{ resource_result: element, ..} if matches!(element, VariableReflectionType::Scalar(ScalarType::Float32))),
+                        "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float buffers"
+                    );
+                    let [UserAttributeParameter::Int(count)] = attribute.parameters[..] else {
                         panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
-                            parameter.variable().unwrap().name()
+                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
                         )
-                    }
-                    if parameter.ty().unwrap().resource_result_type().kind() != TypeKind::Scalar
-                        || parameter.ty().unwrap().resource_result_type().scalar_type()
-                            != ScalarType::Float32
-                    {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float buffers",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
-                    let count = attribute.argument_value_int(0).unwrap();
-                    if count < 0 {
-                        panic!(
-                            "{playground_attribute_name} count for {} cannot have negative size",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                    };
+                    assert!(
+                        count >= 0,
+                        "{playground_attribute_name} count for {name} cannot have negative size",
+                    );
                     Some(ResourceCommandData::Rand(count as u32))
                 } else if playground_attribute_name == "BLACK" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Resource
-                        || parameter.ty().unwrap().resource_shape() != ResourceShape::SlangTexture2d
-                    {
+                    let BoundResource::Texture {
+                        tex_type: TextureType::Dim2,
+                        resource_result: resource_type,
+                        format,
+                        ..
+                    } = resource
+                    else {
                         panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports 2D textures",
-                            parameter.variable().unwrap().name()
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 2D textures",
                         )
-                    }
+                    };
 
-                    let width = attribute.argument_value_int(0).unwrap();
-                    let height = attribute.argument_value_int(1).unwrap();
-                    if width < 0 {
+                    let [
+                        UserAttributeParameter::Int(width),
+                        UserAttributeParameter::Int(height),
+                    ] = attribute.parameters[..]
+                    else {
                         panic!(
-                            "{playground_attribute_name} width for {} cannot have negative size",
-                            parameter.variable().unwrap().name()
+                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
                         )
-                    }
-                    if height < 0 {
-                        panic!(
-                            "{playground_attribute_name} height for {} cannot have negative size",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                    };
 
-                    let format = reflection.binding_range_image_format(offset);
+                    assert!(
+                        width >= 0,
+                        "{playground_attribute_name} width for {name} cannot have negative size",
+                    );
+                    assert!(
+                        height >= 0,
+                        "{playground_attribute_name} height for {name} cannot have negative size",
+                    );
 
                     Some(ResourceCommandData::Black {
                         width: width as u32,
                         height: height as u32,
-                        format: get_wgpu_format_from_slang_format(
-                            format,
-                            parameter.ty().unwrap().resource_result_type(),
-                        ),
+                        format: get_wgpu_format_from_slang_format(format, resource_type),
                     })
                 } else if playground_attribute_name == "BLACK_3D" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Resource
-                        || parameter.ty().unwrap().resource_shape() != ResourceShape::SlangTexture3d
-                    {
+                    let BoundResource::Texture {
+                        tex_type: TextureType::Dim3,
+                        resource_result: resource_type,
+                        format,
+                        ..
+                    } = resource
+                    else {
                         panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports 3D textures",
-                            parameter.variable().unwrap().name()
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 3D textures",
                         )
-                    }
+                    };
 
-                    let size_x = attribute.argument_value_int(0).unwrap();
-                    let size_y = attribute.argument_value_int(1).unwrap();
-                    let size_z = attribute.argument_value_int(2).unwrap();
+                    let [
+                        UserAttributeParameter::Int(size_x),
+                        UserAttributeParameter::Int(size_y),
+                        UserAttributeParameter::Int(size_z),
+                    ] = attribute.parameters[..]
+                    else {
+                        panic!(
+                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                        )
+                    };
+
                     macro_rules! check_positive {
                         ($id:ident) => {
                             if $id < 0 {
                                 panic!(
-                                    "{playground_attribute_name} {} for {} cannot have negative size",
+                                    "{playground_attribute_name} {} for {name} cannot have negative size",
                                     stringify!($id),
-                                    parameter.variable().unwrap().name()
                                 )
                             }
                         };
@@ -472,74 +460,69 @@ impl SlangCompiler {
                     check_positive!(size_y);
                     check_positive!(size_z);
 
-                    let format = reflection.binding_range_image_format(offset);
-
                     Some(ResourceCommandData::Black3D {
                         size_x: size_x as u32,
                         size_y: size_y as u32,
                         size_z: size_z as u32,
-                        format: get_wgpu_format_from_slang_format(
-                            format,
-                            parameter.ty().unwrap().resource_result_type(),
-                        ),
+                        format: get_wgpu_format_from_slang_format(format, resource_type),
                     })
                 } else if playground_attribute_name == "BLACK_SCREEN" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Resource
-                        || parameter.ty().unwrap().resource_shape() != ResourceShape::SlangTexture2d
-                    {
+                    let BoundResource::Texture {
+                        tex_type: TextureType::Dim2,
+                        resource_result: resource_type,
+                        format,
+                        ..
+                    } = resource
+                    else {
                         panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports 2D textures",
-                            parameter.variable().unwrap().name()
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 2D textures",
                         )
-                    }
+                    };
 
-                    let width_scale = attribute.argument_value_float(0).unwrap();
-                    let height_scale = attribute.argument_value_float(1).unwrap();
-                    if width_scale < 0.0 {
+                    let [
+                        UserAttributeParameter::Float(width_scale),
+                        UserAttributeParameter::Float(height_scale),
+                    ] = attribute.parameters[..]
+                    else {
                         panic!(
-                            "{playground_attribute_name} width for {} cannot have negative size",
-                            parameter.variable().unwrap().name()
+                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
                         )
-                    }
-                    if height_scale < 0.0 {
-                        panic!(
-                            "{playground_attribute_name} height for {} cannot have negative size",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                    };
 
-                    let format = reflection.binding_range_image_format(offset);
+                    assert!(
+                        width_scale >= 0.0,
+                        "{playground_attribute_name} width for {name} cannot have negative size",
+                    );
+                    assert!(
+                        height_scale >= 0.0,
+                        "{playground_attribute_name} height for {name} cannot have negative size",
+                    );
 
                     Some(ResourceCommandData::BlackScreen {
                         width_scale,
                         height_scale,
-                        format: get_wgpu_format_from_slang_format(
-                            format,
-                            parameter.ty().unwrap().resource_result_type(),
-                        ),
+                        format: get_wgpu_format_from_slang_format(format, resource_type),
                     })
                 } else if playground_attribute_name == "URL" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Resource
-                        || parameter.ty().unwrap().resource_shape() != ResourceShape::SlangTexture2d
-                    {
-                        panic!(
-                            "URL attribute cannot be applied to {}, it only supports 2D textures",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
-
-                    let format = reflection.binding_range_image_format(offset);
-
-                    let format = get_wgpu_format_from_slang_format(
+                    let BoundResource::Texture {
+                        tex_type: TextureType::Dim2,
+                        resource_result: resource_type,
                         format,
-                        parameter.ty().unwrap().resource_result_type(),
-                    );
+                        ..
+                    } = resource
+                    else {
+                        panic!(
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 2D textures",
+                        )
+                    };
 
-                    let url = attribute
-                        .argument_value_string(0)
-                        .unwrap()
-                        .trim_matches('"')
-                        .to_string();
+                    let format = get_wgpu_format_from_slang_format(format, resource_type);
+
+                    let [UserAttributeParameter::String(url)] = &attribute.parameters[..] else {
+                        panic!(
+                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                        )
+                    };
 
                     let parsed_url = Url::parse(&url);
                     let image_bytes =
@@ -598,78 +581,67 @@ impl SlangCompiler {
                         format,
                     })
                 } else if playground_attribute_name == "MODEL" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Resource
-                        || parameter.ty().unwrap().resource_shape()
-                            != ResourceShape::SlangStructuredBuffer
-                    {
+                    let BoundResource::StructuredBuffer {
+                        resource_result: element_type,
+                        ..
+                    } = resource
+                    else {
                         panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports buffers",
-                            parameter.variable().unwrap().name()
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports buffers",
                         )
-                    }
-                    if parameter.ty().unwrap().element_type().kind() != TypeKind::Struct {
+                    };
+                    let VariableReflectionType::Struct(fields) = element_type else {
                         panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, inner type must be struct",
-                            parameter.variable().unwrap().name()
+                            "{playground_attribute_name} attribute cannot be applied to {name}, inner type must be struct",
                         )
-                    }
+                    };
                     let mut field_types = vec![];
-                    for field in parameter.ty().unwrap().element_type().fields() {
-                        match field.name() {
+                    for (field_name, field) in fields {
+                        match field_name.as_str() {
                             "position" => {
-                                if field.ty().kind() != TypeKind::Vector
-                                    || field.ty().element_count() != 3
-                                    || field.ty().element_type().kind() != TypeKind::Scalar
-                                    || field.ty().element_type().scalar_type()
-                                        != ScalarType::Float32
-                                {
+                                if !matches!(
+                                    field,
+                                    VariableReflectionType::Vector(ScalarType::Float32, 3)
+                                ) {
                                     panic!(
-                                        "Unsupported type for position field of MODEL struct for {}",
-                                        parameter.variable().unwrap().name()
+                                        "Unsupported type for {field_name} field of MODEL struct for {name}"
                                     )
                                 }
                                 field_types.push(ModelField::Position)
                             }
                             "normal" => {
-                                if field.ty().kind() != TypeKind::Vector
-                                    || field.ty().element_count() != 3
-                                    || field.ty().element_type().kind() != TypeKind::Scalar
-                                    || field.ty().element_type().scalar_type()
-                                        != ScalarType::Float32
-                                {
+                                if !matches!(
+                                    field,
+                                    VariableReflectionType::Vector(ScalarType::Float32, 3)
+                                ) {
                                     panic!(
-                                        "Unsupported type for normal field of MODEL struct for {}",
-                                        parameter.variable().unwrap().name()
+                                        "Unsupported type for {field_name} field of MODEL struct for {name}"
                                     )
                                 }
                                 field_types.push(ModelField::Normal)
                             }
                             "uv" => {
-                                if field.ty().kind() != TypeKind::Vector
-                                    || field.ty().element_count() != 3
-                                    || field.ty().element_type().kind() != TypeKind::Scalar
-                                    || field.ty().element_type().scalar_type()
-                                        != ScalarType::Float32
-                                {
+                                if !matches!(
+                                    field,
+                                    VariableReflectionType::Vector(ScalarType::Float32, 3)
+                                ) {
                                     panic!(
-                                        "Unsupported type for normal field of MODEL struct for {}",
-                                        parameter.variable().unwrap().name()
+                                        "Unsupported type for {field_name} field of MODEL struct for {name}"
                                     )
                                 }
                                 field_types.push(ModelField::TexCoords)
                             }
                             field_name => panic!(
-                                "{field_name} is not a valid field for MODEL attribute on {}, valid fields are: position, normal, uv",
-                                parameter.variable().unwrap().name()
+                                "{field_name} is not a valid field for MODEL attribute on {name}, valid fields are: position, normal, uv",
                             ),
                         }
                     }
 
-                    let path = attribute
-                        .argument_value_string(0)
-                        .unwrap()
-                        .trim_matches('"')
-                        .to_string();
+                    let [UserAttributeParameter::String(path)] = &attribute.parameters[..] else {
+                        panic!(
+                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                        )
+                    };
 
                     // load obj file from path
                     let (models, _) = tobj::load_obj(
@@ -740,31 +712,34 @@ impl SlangCompiler {
 
                     Some(ResourceCommandData::Model { data })
                 } else if playground_attribute_name == "REBIND_FOR_DRAW" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Resource
-                        || !(parameter.ty().unwrap().resource_shape()
-                            == ResourceShape::SlangTexture2d
-                            || parameter.ty().unwrap().resource_shape()
-                                == ResourceShape::SlangStructuredBuffer)
-                    {
+                    assert!(
+                        matches!(
+                            resource,
+                            BoundResource::Texture {
+                                tex_type: TextureType::Dim2,
+                                ..
+                            } | BoundResource::StructuredBuffer { .. }
+                        ),
+                        "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 2D textures and structured buffers",
+                    );
+
+                    let [UserAttributeParameter::String(original_resource)] =
+                        &attribute.parameters[..]
+                    else {
                         panic!(
-                            "REBIND_FOR_DRAW attribute cannot be applied to {}, it only supports 2D textures and structured buffers",
-                            parameter.variable().unwrap().name()
+                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
                         )
-                    }
+                    };
 
                     Some(ResourceCommandData::RebindForDraw {
-                        original_resource: attribute
-                            .argument_value_string(0)
-                            .unwrap()
-                            .trim_matches('"')
-                            .to_string(),
+                        original_resource: original_resource.clone(),
                     })
                 } else {
                     None
                 };
 
                 if let Some(command) = command {
-                    commands.insert(parameter.variable().unwrap().name().to_string(), command);
+                    commands.insert(name.clone(), command);
                 }
             }
         }
@@ -773,130 +748,130 @@ impl SlangCompiler {
     }
     fn uniform_controllers_from_attributes(
         &self,
-        reflection: &TypeLayout,
-        top_level_reflection: &TypeLayout,
+        reflection: &Vec<VariableReflection>,
     ) -> Vec<UniformController> {
-        if matches!(reflection.kind(), TypeKind::ConstantBuffer) {
-            return self.uniform_controllers_from_attributes(
-                reflection.element_type_layout(),
-                top_level_reflection,
-            );
-        }
-
         let mut commands: Vec<UniformController> = Vec::new();
 
-        for parameter in reflection.fields() {
-            for attribute in parameter.variable().unwrap().user_attributes() {
-                let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
+        for VariableReflection {
+            reflection_type,
+            name,
+            user_attributes,
+        } in reflection
+        {
+            let BoundParameter::Uniform {
+                uniform_offset,
+                resource_result,
+            } = reflection_type
+            else {
+                continue;
+            };
+            for attribute in user_attributes {
+                let Some(playground_attribute_name) = attribute.name.strip_prefix("playground_")
                 else {
                     continue;
                 };
                 use slang_compiler_type_definitions::UniformControllerType;
-                let command: Option<Box<dyn UniformControllerType>> = if playground_attribute_name
-                    == "SLIDER"
-                {
-                    if parameter.ty().unwrap().kind() != TypeKind::Scalar
-                        || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
-                        || parameter.category_by_index(0) != ParameterCategory::Uniform
-                    {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                let controller: Option<Box<dyn UniformControllerType>> =
+                    if playground_attribute_name == "SLIDER" {
+                        assert!(
+                            matches!(
+                                resource_result,
+                                VariableReflectionType::Scalar(ScalarType::Float32)
+                            ),
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float uniforms",
+                        );
 
-                    Some(Box::new(UniformSlider {
-                        value: attribute.argument_value_float(0).unwrap(),
-                        min: attribute.argument_value_float(1).unwrap(),
-                        max: attribute.argument_value_float(2).unwrap(),
-                    }))
-                } else if playground_attribute_name == "COLOR_PICK" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Vector
-                        || parameter.ty().unwrap().element_count() <= 2
-                        || parameter.ty().unwrap().element_type().kind() != TypeKind::Scalar
-                        || parameter.ty().unwrap().element_type().scalar_type()
-                            != ScalarType::Float32
-                        || parameter.category_by_index(0) != ParameterCategory::Uniform
-                    {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float vectors",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                        let [
+                            UserAttributeParameter::Float(value),
+                            UserAttributeParameter::Float(min),
+                            UserAttributeParameter::Float(max),
+                        ] = attribute.parameters[..]
+                        else {
+                            panic!(
+                                "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                            )
+                        };
 
-                    Some(Box::new(UniformColorPick {
-                        value: [
-                            attribute.argument_value_float(0).unwrap(),
-                            attribute.argument_value_float(1).unwrap(),
-                            attribute.argument_value_float(2).unwrap(),
-                        ],
-                    }))
-                } else if playground_attribute_name == "MOUSE_POSITION" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Vector
-                        || parameter.ty().unwrap().element_count() <= 3
-                        || parameter.ty().unwrap().element_type().kind() != TypeKind::Scalar
-                        || parameter.ty().unwrap().element_type().scalar_type()
-                            != ScalarType::Float32
-                        || parameter.category_by_index(0) != ParameterCategory::Uniform
-                    {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float vectors",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                        Some(Box::new(UniformSlider { value, min, max }))
+                    } else if playground_attribute_name == "COLOR_PICK" {
+                        assert!(
+                            matches!(
+                                resource_result,
+                                VariableReflectionType::Vector(ScalarType::Float32, 3 | 4)
+                            ),
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float vectors",
+                        );
 
-                    Some(Box::new(UniformMousePosition))
-                } else if playground_attribute_name == "KEY_INPUT" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Scalar
-                        || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
-                        || parameter.category_by_index(0) != ParameterCategory::Uniform
-                    {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                        let [
+                            UserAttributeParameter::Float(red),
+                            UserAttributeParameter::Float(green),
+                            UserAttributeParameter::Float(blue),
+                        ] = attribute.parameters[..]
+                        else {
+                            panic!(
+                                "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                            )
+                        };
 
-                    Some(Box::new(UniformKeyInput {
-                        key: attribute
-                            .argument_value_string(0)
-                            .unwrap()
-                            .trim_matches('"')
-                            .to_string(),
-                    }))
-                } else if playground_attribute_name == "TIME" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Scalar
-                        || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
-                        || parameter.category_by_index(0) != ParameterCategory::Uniform
-                    {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                        Some(Box::new(UniformColorPick {
+                            value: [red, green, blue],
+                        }))
+                    } else if playground_attribute_name == "MOUSE_POSITION" {
+                        assert!(
+                            matches!(
+                                resource_result,
+                                VariableReflectionType::Vector(ScalarType::Float32, 4)
+                            ),
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float4 vectors",
+                        );
 
-                    Some(Box::new(UniformTime))
-                } else if playground_attribute_name == "DELTA_TIME" {
-                    if parameter.ty().unwrap().kind() != TypeKind::Scalar
-                        || parameter.ty().unwrap().scalar_type() != ScalarType::Float32
-                        || parameter.category_by_index(0) != ParameterCategory::Uniform
-                    {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {}, it only supports float uniforms",
-                            parameter.variable().unwrap().name()
-                        )
-                    }
+                        Some(Box::new(UniformMousePosition))
+                    } else if playground_attribute_name == "KEY_INPUT" {
+                        assert!(
+                            matches!(
+                                resource_result,
+                                VariableReflectionType::Scalar(ScalarType::Float32)
+                            ),
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float uniforms",
+                        );
 
-                    Some(Box::new(UniformDeltaTime))
-                } else {
-                    None
-                };
+                        let [UserAttributeParameter::String(key)] = &attribute.parameters[..]
+                        else {
+                            panic!(
+                                "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                            )
+                        };
 
-                if let Some(command) = command {
+                        Some(Box::new(UniformKeyInput { key: key.clone() }))
+                    } else if playground_attribute_name == "TIME" {
+                        assert!(
+                            matches!(
+                                resource_result,
+                                VariableReflectionType::Scalar(ScalarType::Float32)
+                            ),
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float uniforms",
+                        );
+
+                        Some(Box::new(UniformTime))
+                    } else if playground_attribute_name == "DELTA_TIME" {
+                        assert!(
+                            matches!(
+                                resource_result,
+                                VariableReflectionType::Scalar(ScalarType::Float32)
+                            ),
+                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float uniforms",
+                        );
+
+                        Some(Box::new(UniformDeltaTime))
+                    } else {
+                        None
+                    };
+
+                if let Some(controller) = controller {
                     commands.push(UniformController {
-                        name: parameter.variable().unwrap().name().to_string(),
-                        buffer_offset: parameter.offset(ParameterCategory::Uniform),
-                        controller: command,
+                        name: name.to_string(),
+                        buffer_offset: *uniform_offset,
+                        controller,
                     });
                 }
             }
@@ -913,19 +888,19 @@ impl SlangCompiler {
             .collect::<Vec<_>>();
         let search_paths = search_paths.iter().map(|p| p.as_ptr()).collect::<Vec<_>>();
 
-        let session_options = slang::CompilerOptions::default()
-            .optimization(slang::OptimizationLevel::High)
+        let session_options = slang_reflector::CompilerOptions::default()
+            .optimization(slang_reflector::OptimizationLevel::High)
             .matrix_layout_row(true);
 
-        let target_desc = slang::TargetDesc::default()
-            .format(slang::CompileTarget::Wgsl)
+        let target_desc = slang_reflector::TargetDesc::default()
+            .format(slang_reflector::CompileTarget::Wgsl)
             .profile(self.global_slang_session.find_profile("spirv_1_6"));
 
         let custom_file_system = CustomFileSystem::new();
 
         let targets = [target_desc];
 
-        let session_desc = slang::SessionDesc::default()
+        let session_desc = slang_reflector::SessionDesc::default()
             .targets(&targets)
             .search_paths(&search_paths)
             .options(&session_options)
@@ -935,18 +910,17 @@ impl SlangCompiler {
             panic!("Failed to create slang session");
         };
 
-        let mut components: Vec<slang::ComponentType> = vec![];
+        let mut components: Vec<slang_reflector::ComponentType> = vec![];
 
-        let user_module = match slang_session.load_module(entry_module_name) {
-            Ok(module) => module,
-            Err(e) => {
+        let user_module = slang_session
+            .load_module(entry_module_name)
+            .unwrap_or_else(|e| {
                 panic!(
                     "Failed to load module {}: {:?}",
                     entry_module_name,
                     e.to_string()
-                );
-            }
-        };
+                )
+            });
 
         let count = user_module.entry_point_count();
         for i in 0..count {
@@ -970,7 +944,6 @@ impl SlangCompiler {
         let linked_program = program.link().unwrap();
 
         let shader_reflection = linked_program.layout(0).unwrap();
-        let hashed_strings = load_strings(&shader_reflection);
         let out_code = linked_program
             .target_code(0)
             .unwrap_or_else(|err| panic!("Failed to compile shader: {:?}", err.to_string()))
@@ -981,22 +954,21 @@ impl SlangCompiler {
         let mut entry_group_sizes = HashMap::new();
         for entry in shader_reflection.entry_points() {
             let group_size = entry.compute_thread_group_size();
-            if entry.stage() == Stage::Compute {
+            if entry.stage() == slang_reflector::Stage::Compute {
                 entry_group_sizes.insert(entry.name().to_string(), group_size);
             }
         }
 
-        let global_layout = shader_reflection.global_params_type_layout();
+        let global_reflection = shader_reflection.reflect();
 
         let resource_commands =
-            self.resource_commands_from_attributes(&global_layout, &global_layout);
+            self.resource_commands_from_attributes(&global_reflection.variables);
         let uniform_controllers =
-            self.uniform_controllers_from_attributes(&global_layout, &global_layout);
-        let call_commands = parse_call_commands(&shader_reflection);
-        let draw_commands = parse_draw_commands(&shader_reflection);
+            self.uniform_controllers_from_attributes(&global_reflection.variables);
+        let call_commands = parse_call_commands(&global_reflection);
+        let draw_commands = parse_draw_commands(&global_reflection);
 
-        let bindings =
-            self.get_resource_bindings(&global_layout, &global_layout, &resource_commands);
+        let bindings = self.get_resource_bindings(&global_reflection, &resource_commands);
 
         CompilationResult {
             out_code,
@@ -1006,26 +978,18 @@ impl SlangCompiler {
             resource_commands,
             call_commands,
             draw_commands,
-            hashed_strings,
-            uniform_size: get_uniform_size(&shader_reflection),
+            uniform_size: get_uniform_size(&global_reflection),
+            hashed_strings: global_reflection.hashed_strings,
         }
     }
 }
 
-fn parameter_texture_view_dimension(parameter: &VariableLayout) -> wgpu::TextureViewDimension {
-    match parameter.ty().unwrap().resource_shape() {
-        ResourceShape::SlangTexture1d => wgpu::TextureViewDimension::D1,
-        ResourceShape::SlangTexture2d | ResourceShape::SlangTexture2dMultisample => {
-            wgpu::TextureViewDimension::D2
-        }
-        ResourceShape::SlangTexture3d => wgpu::TextureViewDimension::D3,
-        ResourceShape::SlangTextureCube => wgpu::TextureViewDimension::Cube,
-        ResourceShape::SlangTexture1dArray => panic!("wgpu does not support 1d array textures"),
-        ResourceShape::SlangTexture2dArray | ResourceShape::SlangTexture2dMultisampleArray => {
-            wgpu::TextureViewDimension::D2Array
-        }
-        ResourceShape::SlangTextureCubeArray => panic!("wgpu does not support cube array textures"),
-        _ => panic!("Could not process resource shape"),
+fn parameter_texture_view_dimension(tex_type: &TextureType) -> wgpu::TextureViewDimension {
+    match tex_type {
+        TextureType::Dim1 => wgpu::TextureViewDimension::D1,
+        TextureType::Dim2 => wgpu::TextureViewDimension::D2,
+        TextureType::Dim3 => wgpu::TextureViewDimension::D3,
+        TextureType::Cube => wgpu::TextureViewDimension::Cube,
     }
 }
 
@@ -1040,19 +1004,17 @@ fn is_available_in_compute(resource_command: &ResourceCommandData) -> bool {
     !matches!(resource_command, ResourceCommandData::RebindForDraw { .. })
 }
 
-fn is_available_in_graphics(parameter: &VariableLayout) -> bool {
-    match parameter.ty().unwrap().kind() {
-        TypeKind::Resource => matches!(
-            (
-                parameter.ty().unwrap().resource_shape(),
-                parameter.ty().unwrap().resource_access(),
-            ),
-            (
-                ResourceShape::SlangTexture2d | ResourceShape::SlangStructuredBuffer,
-                ResourceAccess::Read,
-            )
-        ),
-        TypeKind::SamplerState | TypeKind::ConstantBuffer => true,
+fn is_available_in_graphics(parameter: &BoundResource) -> bool {
+    match parameter {
+        BoundResource::Texture {
+            resource_access: ResourceAccess::Read,
+            ..
+        } => true,
+        BoundResource::StructuredBuffer {
+            resource_access: ResourceAccess::Read,
+            ..
+        } => true,
+        BoundResource::Sampler => true,
         _ => false,
     }
 }
@@ -1062,29 +1024,21 @@ fn round_up_to_nearest(size: u64, arg: u64) -> u64 {
 }
 
 fn get_wgpu_format_from_slang_format(
-    format: slang::ImageFormat,
-    resource_type: &slang::reflection::Type,
+    format: &slang_reflector::ImageFormat,
+    resource_type: &VariableReflectionType,
 ) -> wgpu::TextureFormat {
-    use slang::ImageFormat;
+    use slang_reflector::ImageFormat;
     use wgpu::TextureFormat;
     match format {
-        ImageFormat::SLANGIMAGEFORMATUnknown => match resource_type.kind() {
-            TypeKind::Vector => match (
-                resource_type.element_type().scalar_type(),
-                resource_type.element_count(),
-            ) {
-                (ScalarType::Float32, 2) => TextureFormat::Rg32Float,
-                (ScalarType::Float32, 3) => TextureFormat::Rgba32Float,
-                (ScalarType::Float32, 4) => TextureFormat::Rgba32Float,
-                _ => panic!("Invalid resource type"),
-            },
-            TypeKind::Scalar => match resource_type.scalar_type() {
-                ScalarType::Int32 => TextureFormat::R32Sint,
-                ScalarType::Uint32 => TextureFormat::R32Uint,
-                ScalarType::Float32 => TextureFormat::R32Float,
-                _ => panic!("Invalid resource type"),
-            },
-            _ => panic!("Invalid resource type"),
+        ImageFormat::SLANGIMAGEFORMATUnknown => match resource_type {
+            VariableReflectionType::Vector(ScalarType::Float32, 2) => TextureFormat::Rg32Float,
+            VariableReflectionType::Vector(ScalarType::Float32, 3 | 4) => {
+                TextureFormat::Rgba32Float
+            }
+            VariableReflectionType::Scalar(ScalarType::Int32) => TextureFormat::R32Sint,
+            VariableReflectionType::Scalar(ScalarType::Uint32) => TextureFormat::R32Uint,
+            VariableReflectionType::Scalar(ScalarType::Float32) => TextureFormat::R32Float,
+            _ => panic!("Could not infer image format from resource type {resource_type:?}"),
         },
         ImageFormat::SLANGIMAGEFORMATR8Snorm => TextureFormat::R8Snorm,
         ImageFormat::SLANGIMAGEFORMATR8 => TextureFormat::R8Unorm,
@@ -1120,71 +1074,17 @@ fn get_wgpu_format_from_slang_format(
     }
 }
 
-fn load_strings(shader_reflection: &ProgramLayout) -> HashMap<u32, String> {
-    (0..shader_reflection.hashed_string_count())
-        .map(|i| shader_reflection.hashed_string(i).unwrap().to_string())
-        .map(|s| (slang::reflection::compute_string_hash(s.as_str()), s))
-        .collect()
-}
-
-fn get_layout_size(resource_result_type: &slang::reflection::TypeLayout) -> u32 {
-    match resource_result_type.kind() {
-        TypeKind::Scalar => match resource_result_type.scalar_type().unwrap() {
-            slang::ScalarType::Int8 | slang::ScalarType::Uint8 => 1,
-            slang::ScalarType::Int16 | slang::ScalarType::Uint16 | slang::ScalarType::Float16 => 2,
-            slang::ScalarType::Int32 | slang::ScalarType::Uint32 | slang::ScalarType::Float32 => 4,
-            slang::ScalarType::Int64 | slang::ScalarType::Uint64 | slang::ScalarType::Float64 => 8,
-            _ => panic!("Unimplemented scalar type"),
-        },
-        TypeKind::Vector => {
-            let count = resource_result_type
-                .element_count()
-                .unwrap()
-                .next_power_of_two() as u32;
-            count * get_layout_size(resource_result_type.element_type_layout())
-        }
-        TypeKind::Struct => resource_result_type
-            .fields()
-            .map(|f| get_layout_size(f.type_layout()))
-            .fold(0, |a, f| (a + f).div_ceil(f) * f),
-        TypeKind::Array => {
-            get_layout_size(resource_result_type.element_type_layout())
-                * resource_result_type.element_count().unwrap() as u32
-        }
-        ty => panic!("Unimplemented type {ty:?} for get_size"),
-    }
-}
-
-fn get_size(resource_result_type: &slang::reflection::Type) -> u32 {
-    match resource_result_type.kind() {
-        TypeKind::Scalar => match resource_result_type.scalar_type() {
-            slang::ScalarType::Int8 | slang::ScalarType::Uint8 => 1,
-            slang::ScalarType::Int16 | slang::ScalarType::Uint16 | slang::ScalarType::Float16 => 2,
-            slang::ScalarType::Int32 | slang::ScalarType::Uint32 | slang::ScalarType::Float32 => 4,
-            slang::ScalarType::Int64 | slang::ScalarType::Uint64 | slang::ScalarType::Float64 => 8,
-            _ => panic!("Unimplemented scalar type"),
-        },
-        TypeKind::Vector => {
-            let count = resource_result_type.element_count().next_power_of_two() as u32;
-            count * get_size(resource_result_type.element_type())
-        }
-        TypeKind::Struct => resource_result_type
-            .fields()
-            .map(|f| get_size(f.ty()))
-            .fold(0, |a, f| (a + f).div_ceil(f) * f),
-        _ => panic!("Unimplemented type for get_size"),
-    }
-}
-
-fn parse_call_commands(reflection: &ProgramLayout) -> Vec<CallCommand> {
+fn parse_call_commands(reflection: &ProgramReflection) -> Vec<CallCommand> {
     let mut call_commands: Vec<CallCommand> = vec![];
-    for entry_point in reflection.entry_points() {
-        let fn_name = entry_point.name();
+    for EntrypointReflection {
+        name,
+        user_attributes,
+    } in &reflection.entry_points
+    {
         let mut call_command = None;
         let mut call_once = false;
-        for attribute in entry_point.function().user_attributes() {
-            let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
-            else {
+        for attribute in user_attributes {
+            let Some(playground_attribute_name) = attribute.name.strip_prefix("playground_") else {
                 continue;
             };
             if playground_attribute_name == "CALL_SIZE_OF" {
@@ -1192,33 +1092,37 @@ fn parse_call_commands(reflection: &ProgramLayout) -> Vec<CallCommand> {
                     panic!("Cannot have multiple CALL attributes for the same function");
                 }
 
-                let resource_name = attribute
-                    .argument_value_string(0)
-                    .unwrap()
-                    .trim_matches('"');
+                let [UserAttributeParameter::String(resource_name)] = &attribute.parameters[..]
+                else {
+                    panic!(
+                        "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                    )
+                };
 
-                let mut resource_reflection = reflection.global_params_type_layout();
-
-                if matches!(resource_reflection.kind(), TypeKind::ConstantBuffer) {
-                    resource_reflection = resource_reflection.element_type_layout();
-                }
-                let resource_reflection = resource_reflection
-                    .fields()
-                    .find(|param| param.variable().unwrap().name() == resource_name)
+                let resource_reflection = reflection
+                    .variables
+                    .iter()
+                    .find(|param| &param.name == resource_name)
                     .unwrap();
 
                 let mut element_size: Option<u32> = None;
-                if resource_reflection.ty().unwrap().kind() == TypeKind::Resource
-                    && resource_reflection.ty().unwrap().resource_shape()
-                        == ResourceShape::SlangStructuredBuffer
+                if let VariableReflection {
+                    reflection_type:
+                        BoundParameter::Resource {
+                            resource:
+                                BoundResource::StructuredBuffer {
+                                    resource_result, ..
+                                },
+                            ..
+                        },
+                    ..
+                } = resource_reflection
                 {
-                    element_size = Some(get_size(
-                        resource_reflection.ty().unwrap().resource_result_type(),
-                    ));
+                    element_size = Some(resource_result.get_size());
                 }
 
                 call_command = Some(CallCommand {
-                    function: fn_name.to_string(),
+                    function: name.clone(),
                     call_once: false,
                     parameters: CallCommandParameters::ResourceBased(
                         resource_name.to_string(),
@@ -1230,42 +1134,68 @@ fn parse_call_commands(reflection: &ProgramLayout) -> Vec<CallCommand> {
                     panic!("Cannot have multiple CALL attributes for the same function");
                 }
 
-                let args: Vec<u32> = (0..attribute.argument_count())
-                    .map(|i| attribute.argument_value_int(i).unwrap() as u32)
-                    .collect();
+                let [
+                    UserAttributeParameter::Int(size_x),
+                    UserAttributeParameter::Int(size_y),
+                    UserAttributeParameter::Int(size_z),
+                ] = attribute.parameters[..]
+                else {
+                    panic!(
+                        "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                    )
+                };
+
                 call_command = Some(CallCommand {
-                    function: fn_name.to_string(),
+                    function: name.clone(),
                     call_once: false,
-                    parameters: CallCommandParameters::FixedSize(args),
+                    parameters: CallCommandParameters::FixedSize(vec![
+                        size_x as u32,
+                        size_y as u32,
+                        size_z as u32,
+                    ]),
                 });
             } else if playground_attribute_name == "CALL_INDIRECT" {
                 if call_command.is_some() {
                     panic!("Cannot have multiple CALL attributes for the same function");
                 }
 
-                let resource_name = attribute
-                    .argument_value_string(0)
-                    .unwrap()
-                    .trim_matches('"')
-                    .to_string();
+                let [
+                    UserAttributeParameter::String(resource_name),
+                    UserAttributeParameter::Int(offset),
+                ] = &attribute.parameters[..]
+                else {
+                    panic!(
+                        "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                    )
+                };
+
                 let resource_reflection = reflection
-                    .parameters()
-                    .find(|param| param.variable().unwrap().name() == resource_name)
+                    .variables
+                    .iter()
+                    .find(|param| &param.name == resource_name)
                     .unwrap();
 
-                if resource_reflection.ty().unwrap().kind() != TypeKind::Resource
-                    && resource_reflection.ty().unwrap().resource_shape()
-                        != ResourceShape::SlangStructuredBuffer
-                {
-                    panic!("Invalid type for CALL_INDIRECT buffer");
-                }
-
-                let offset = attribute.argument_value_int(1).unwrap() as u32;
+                assert!(
+                    matches!(
+                        resource_reflection,
+                        VariableReflection {
+                            reflection_type: BoundParameter::Resource {
+                                resource: BoundResource::StructuredBuffer { .. },
+                                ..
+                            },
+                            ..
+                        }
+                    ),
+                    "Invalid type for CALL_INDIRECT buffer"
+                );
 
                 call_command = Some(CallCommand {
-                    function: fn_name.to_string(),
+                    function: name.clone(),
                     call_once: false,
-                    parameters: CallCommandParameters::Indirect(resource_name, offset),
+                    parameters: CallCommandParameters::Indirect(
+                        resource_name.clone(),
+                        *offset as u32,
+                    ),
                 });
             } else if playground_attribute_name == "CALL_ONCE" {
                 if call_once {
@@ -1284,25 +1214,31 @@ fn parse_call_commands(reflection: &ProgramLayout) -> Vec<CallCommand> {
     call_commands
 }
 
-fn parse_draw_commands(reflection: &ProgramLayout) -> Vec<DrawCommand> {
+fn parse_draw_commands(reflection: &ProgramReflection) -> Vec<DrawCommand> {
     let mut draw_commands: Vec<DrawCommand> = vec![];
-    for entry_point in reflection.entry_points() {
-        let fn_name = entry_point.name();
-        for attribute in entry_point.function().user_attributes() {
-            let Some(playground_attribute_name) = attribute.name().strip_prefix("playground_")
-            else {
+    for EntrypointReflection {
+        name,
+        user_attributes,
+    } in &reflection.entry_points
+    {
+        for attribute in user_attributes {
+            let Some(playground_attribute_name) = attribute.name.strip_prefix("playground_") else {
                 continue;
             };
             if playground_attribute_name == "DRAW" {
-                let vertex_count = attribute.argument_value_int(0).unwrap();
-                let fragment_entrypoint = attribute
-                    .argument_value_string(1)
-                    .unwrap()
-                    .trim_matches('"');
+                let [
+                    UserAttributeParameter::Int(vertex_count),
+                    UserAttributeParameter::String(fragment_entrypoint),
+                ] = &attribute.parameters[..]
+                else {
+                    panic!(
+                        "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
+                    )
+                };
 
                 draw_commands.push(DrawCommand {
-                    vertex_count: vertex_count as u32,
-                    vertex_entrypoint: fn_name.to_string(),
+                    vertex_count: *vertex_count as u32,
+                    vertex_entrypoint: name.clone(),
                     fragment_entrypoint: fragment_entrypoint.to_string(),
                 });
             }
@@ -1312,17 +1248,21 @@ fn parse_draw_commands(reflection: &ProgramLayout) -> Vec<DrawCommand> {
     draw_commands
 }
 
-fn get_uniform_size(shader_reflection: &ProgramLayout) -> u64 {
+fn get_uniform_size(shader_reflection: &ProgramReflection) -> u64 {
     let mut size = 0;
 
-    for parameter in shader_reflection.parameters() {
-        if parameter.category_by_index(0) != ParameterCategory::Uniform {
+    for VariableReflection {
+        reflection_type, ..
+    } in &shader_reflection.variables
+    {
+        let BoundParameter::Uniform {
+            uniform_offset,
+            resource_result,
+        } = reflection_type
+        else {
             continue;
-        }
-        size = size.max(
-            parameter.offset(ParameterCategory::Uniform) as u64
-                + parameter.type_layout().size(ParameterCategory::Uniform) as u64,
-        )
+        };
+        size = size.max(*uniform_offset as u64 + resource_result.get_size() as u64)
     }
 
     round_up_to_nearest(size, 16)

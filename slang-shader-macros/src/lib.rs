@@ -3,7 +3,11 @@ use std::path::Path;
 use proc_macro::TokenStream;
 use quote::quote;
 use slang_compiler::SlangCompiler;
-use syn::{parse::{Parse, ParseStream}, LitStr, Token, parse_macro_input};
+use syn::{
+    LitStr, Token,
+    parse::{Parse, ParseStream},
+    parse_macro_input,
+};
 mod slang_compiler;
 
 struct CompileShaderInput {
@@ -14,14 +18,13 @@ struct CompileShaderInput {
 impl Parse for CompileShaderInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let shader_path = input.parse()?;
-        
-        
+
         input.parse::<Token![,]>()?;
         let paths_content;
         syn::bracketed!(paths_content in input);
         let paths = paths_content.parse_terminated(|input| input.parse::<LitStr>(), Token![,])?;
         let search_paths = paths.into_iter().collect();
-        
+
         Ok(CompileShaderInput {
             shader_path,
             search_paths,
@@ -31,16 +34,24 @@ impl Parse for CompileShaderInput {
 
 #[proc_macro]
 pub fn compile_shader(input: TokenStream) -> TokenStream {
-    let CompileShaderInput { shader_path, search_paths } = parse_macro_input!(input as CompileShaderInput);
+    let CompileShaderInput {
+        shader_path,
+        search_paths,
+    } = parse_macro_input!(input as CompileShaderInput);
     let shader_path = shader_path.value();
-    
+
     let compiler = SlangCompiler::new();
-    
+
     let search_paths: Vec<String> = search_paths.iter().map(|s| s.value()).collect();
     let mut search_paths = search_paths.iter().map(|s| s.as_str()).collect::<Vec<_>>();
 
     let this_file = file!();
-    let shaders_path = Path::new(this_file).parent().unwrap().parent().unwrap().join("shaders");
+    let shaders_path = Path::new(this_file)
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("shaders");
     let shaders_path = shaders_path.canonicalize().unwrap();
     search_paths.push(shaders_path.to_str().unwrap());
 
