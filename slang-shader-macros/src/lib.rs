@@ -2,13 +2,12 @@ use std::path::Path;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use slang_compiler::SlangCompiler;
+use slang_playground_compiler::SlangCompiler;
 use syn::{
     LitStr, Token,
     parse::{Parse, ParseStream},
     parse_macro_input,
 };
-mod slang_compiler;
 
 struct CompileShaderInput {
     shader_path: LitStr,
@@ -40,7 +39,7 @@ pub fn compile_shader(input: TokenStream) -> TokenStream {
     } = parse_macro_input!(input as CompileShaderInput);
     let shader_path = shader_path.value();
 
-    let compiler = SlangCompiler::new();
+    let compiler = SlangCompiler::default();
 
     let search_paths: Vec<String> = search_paths.iter().map(|s| s.value()).collect();
     let mut search_paths = search_paths.iter().map(|s| s.as_str()).collect::<Vec<_>>();

@@ -10,17 +10,9 @@ proc-macro = true
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
-slang-reflector = { git="https://github.com/Devon7925/slang-reflector.git" }
-image = "0.25.6"
-reqwest = { version = "0.12.15", features = ["blocking"] }
-url = "2.4"
-regex = "1.9"
-tobj = "4.0"
 ron = "0.9.0"
 serde = { version = "1.0", features = ["derive"] }
 wgpu = { version = "24.0.0", features = ["serde"] }
-strum = "0.27.1"
-strum_macros = "0.27.1"
 base64 = "0.22.1"
 serde_json = "1.0"
-slang-compiler-type-definitions = { path = "../slang-compiler-type-definitions" }
+slang-playground-compiler = { path = "../slang-playground-compiler" }

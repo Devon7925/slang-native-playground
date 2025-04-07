@@ -1,13 +1,7 @@
-use slang_compiler_type_definitions::{
-    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
-    UniformColorPick, UniformController, UniformDeltaTime, UniformKeyInput, UniformMousePosition,
-    UniformSlider, UniformTime,
-};
-use slang_reflector::{
-    BoundParameter, BoundResource, EntrypointReflection, GlobalSession, ProgramLayoutReflector,
-    ProgramReflection, ResourceAccess, ScalarType, TextureType, UserAttributeParameter,
-    VariableReflection, VariableReflectionType,
-};
+mod controllers;
+
+use controllers::*;
+use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -17,6 +11,157 @@ use std::{
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use url::Url;
+use wgpu::BindGroupLayoutEntry;
+use winit::keyboard::Key;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum ResourceCommandData {
+    Zeros {
+        count: u32,
+        element_size: u32,
+    },
+    Rand(u32),
+    Black {
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    },
+    Black3D {
+        size_x: u32,
+        size_y: u32,
+        size_z: u32,
+        format: wgpu::TextureFormat,
+    },
+    BlackScreen {
+        width_scale: f32,
+        height_scale: f32,
+        format: wgpu::TextureFormat,
+    },
+    Url {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    },
+    Model {
+        data: Vec<u8>,
+    },
+    Sampler,
+    RebindForDraw {
+        original_resource: String,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ResourceCommand {
+    pub resource_name: String,
+    pub command_data: ResourceCommandData,
+}
+
+pub struct UniformSourceData<'a> {
+    pub launch_time: web_time::Instant,
+    pub delta_time: f32,
+    pub last_mouse_down_pos: [f32; 2],
+    pub last_mouse_clicked_pos: [f32; 2],
+    pub mouse_down: bool,
+    pub mouse_clicked: bool,
+    pub pressed_keys: &'a HashSet<Key>,
+}
+
+impl<'a> UniformSourceData<'a> {
+    pub fn new(keys: &'a HashSet<Key>) -> Self {
+        Self {
+            launch_time: web_time::Instant::now(),
+            delta_time: 0.0,
+            last_mouse_down_pos: [0.0, 0.0],
+            last_mouse_clicked_pos: [0.0, 0.0],
+            mouse_down: false,
+            mouse_clicked: false,
+            pressed_keys: keys,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct UniformController {
+    pub name: String,
+    pub buffer_offset: usize,
+    pub controller: Box<dyn UniformControllerType>,
+}
+
+#[typetag::serde(tag = "type")]
+pub trait UniformControllerType {
+    fn get_data(&self, uniform_source_data: &UniformSourceData) -> Vec<u8>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render(&mut self, _name: &str, _ui: &mut egui::Ui) {}
+
+    fn playground_name() -> String
+    where
+        Self: Sized;
+
+    fn construct(
+        uniform_type: &VariableReflectionType,
+        parameters: &[UserAttributeParameter],
+        variable_name: &str,
+    ) -> Box<dyn UniformControllerType>
+    where
+        Self: Sized;
+
+    fn register(
+        set: &mut HashMap<
+            String,
+            Box<
+                dyn Fn(
+                    &VariableReflectionType,
+                    &[UserAttributeParameter],
+                    &str,
+                ) -> Box<dyn UniformControllerType>,
+            >,
+        >,
+    ) 
+    where
+        Self: Sized + 'static {
+            set.insert(Self::playground_name(), Box::new(Self::construct));
+    }
+}
+
+pub struct CompilationResult {
+    pub out_code: String,
+    pub entry_group_sizes: HashMap<String, [u64; 3]>,
+    pub bindings: HashMap<String, BindGroupLayoutEntry>,
+    pub resource_commands: HashMap<String, ResourceCommandData>,
+    pub call_commands: Vec<CallCommand>,
+    pub draw_commands: Vec<DrawCommand>,
+    pub hashed_strings: HashMap<u32, String>,
+    pub uniform_size: u64,
+    pub uniform_controllers: Vec<UniformController>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub enum CallCommandParameters {
+    ResourceBased(String, Option<u32>),
+    FixedSize(Vec<u32>),
+    Indirect(String, u32),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CallCommand {
+    pub function: String,
+    pub call_once: bool,
+    pub parameters: CallCommandParameters,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DrawCommand {
+    pub vertex_count: u32,
+    pub vertex_entrypoint: String,
+    pub fragment_entrypoint: String,
+}
+use slang_reflector::{
+    BoundParameter, BoundResource, EntrypointReflection, GlobalSession, ProgramLayoutReflector,
+    ProgramReflection, ResourceAccess, ScalarType, TextureType, UserAttributeParameter,
+    VariableReflection, VariableReflectionType,
+};
 
 #[derive(EnumIter, Debug, PartialEq, Clone)]
 enum ShaderType {
@@ -35,11 +180,30 @@ impl ShaderType {
 
 pub struct SlangCompiler {
     global_slang_session: GlobalSession,
+    uniform_controller_constructors: HashMap<
+        String,
+        Box<
+            dyn Fn(
+                &VariableReflectionType,
+                &[UserAttributeParameter],
+                &str,
+            ) -> Box<dyn UniformControllerType>,
+        >,
+    >,
 }
 
 impl Default for SlangCompiler {
     fn default() -> Self {
-        Self::new()
+        let mut default_controllers = HashMap::new();
+
+        UniformSlider::register(&mut default_controllers);
+        UniformColorPick::register(&mut default_controllers);
+        UniformTime::register(&mut default_controllers);
+        UniformMousePosition::register(&mut default_controllers);
+        UniformDeltaTime::register(&mut default_controllers);
+        UniformKeyInput::register(&mut default_controllers);
+
+        Self::new(default_controllers)
     }
 }
 
@@ -142,10 +306,22 @@ impl slang_reflector::FileSystem for CustomFileSystem {
 }
 
 impl SlangCompiler {
-    pub fn new() -> Self {
+    pub fn new(
+        uniform_controller_constructors: HashMap<
+            String,
+            Box<
+                dyn Fn(
+                    &VariableReflectionType,
+                    &[UserAttributeParameter],
+                    &str,
+                ) -> Box<dyn UniformControllerType>,
+            >,
+        >,
+    ) -> Self {
         let global_slang_session = slang_reflector::GlobalSession::new().unwrap();
         SlangCompiler {
             global_slang_session,
+            uniform_controller_constructors,
         }
     }
 
@@ -336,7 +512,8 @@ impl SlangCompiler {
                 continue;
             };
             for attribute in user_attributes {
-                let Some(playground_attribute_name) = attribute.name.strip_prefix("playground_") else {
+                let Some(playground_attribute_name) = attribute.name.strip_prefix("playground_")
+                else {
                     continue;
                 };
                 let command = if playground_attribute_name == "ZEROS" {
@@ -770,104 +947,9 @@ impl SlangCompiler {
                 else {
                     continue;
                 };
-                use slang_compiler_type_definitions::UniformControllerType;
-                let controller: Option<Box<dyn UniformControllerType>> =
-                    if playground_attribute_name == "SLIDER" {
-                        assert!(
-                            matches!(
-                                resource_result,
-                                VariableReflectionType::Scalar(ScalarType::Float32)
-                            ),
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float uniforms",
-                        );
-
-                        let [
-                            UserAttributeParameter::Float(value),
-                            UserAttributeParameter::Float(min),
-                            UserAttributeParameter::Float(max),
-                        ] = attribute.parameters[..]
-                        else {
-                            panic!(
-                                "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                            )
-                        };
-
-                        Some(Box::new(UniformSlider { value, min, max }))
-                    } else if playground_attribute_name == "COLOR_PICK" {
-                        assert!(
-                            matches!(
-                                resource_result,
-                                VariableReflectionType::Vector(ScalarType::Float32, 3 | 4)
-                            ),
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float vectors",
-                        );
-
-                        let [
-                            UserAttributeParameter::Float(red),
-                            UserAttributeParameter::Float(green),
-                            UserAttributeParameter::Float(blue),
-                        ] = attribute.parameters[..]
-                        else {
-                            panic!(
-                                "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                            )
-                        };
-
-                        Some(Box::new(UniformColorPick {
-                            value: [red, green, blue],
-                        }))
-                    } else if playground_attribute_name == "MOUSE_POSITION" {
-                        assert!(
-                            matches!(
-                                resource_result,
-                                VariableReflectionType::Vector(ScalarType::Float32, 4)
-                            ),
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float4 vectors",
-                        );
-
-                        Some(Box::new(UniformMousePosition))
-                    } else if playground_attribute_name == "KEY_INPUT" {
-                        assert!(
-                            matches!(
-                                resource_result,
-                                VariableReflectionType::Scalar(ScalarType::Float32)
-                            ),
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float uniforms",
-                        );
-
-                        let [UserAttributeParameter::String(key)] = &attribute.parameters[..]
-                        else {
-                            panic!(
-                                "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                            )
-                        };
-
-                        Some(Box::new(UniformKeyInput { key: key.clone() }))
-                    } else if playground_attribute_name == "TIME" {
-                        assert!(
-                            matches!(
-                                resource_result,
-                                VariableReflectionType::Scalar(ScalarType::Float32)
-                            ),
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float uniforms",
-                        );
-
-                        Some(Box::new(UniformTime))
-                    } else if playground_attribute_name == "DELTA_TIME" {
-                        assert!(
-                            matches!(
-                                resource_result,
-                                VariableReflectionType::Scalar(ScalarType::Float32)
-                            ),
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float uniforms",
-                        );
-
-                        Some(Box::new(UniformDeltaTime))
-                    } else {
-                        None
-                    };
-
-                if let Some(controller) = controller {
+                
+                if let Some(constructor) = self.uniform_controller_constructors.get(playground_attribute_name) {
+                    let controller = constructor(resource_result, &attribute.parameters, name);
                     commands.push(UniformController {
                         name: name.to_string(),
                         buffer_offset: *uniform_offset,

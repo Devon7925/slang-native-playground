@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use slang_compiler_type_definitions::ResourceCommandData;
+use slang_playground_compiler::ResourceCommandData;
 use wgpu::{
     ColorWrites, DepthStencilState, Device, FragmentState, RenderPassDepthStencilAttachment,
     VertexState,
@@ -158,7 +158,7 @@ impl DrawPipeline {
                             } else if let Some(replacement) = rebound_buffers.get(&name) {
                                 replacement
                             } else {
-                                name
+                                &name
                             },
                         )
                         .unwrap()
@@ -174,7 +174,7 @@ impl DrawPipeline {
                             } else if let Some(replacement) = rebound_textures.get(&name) {
                                 replacement
                             } else {
-                                name
+                                &name
                             },
                         )
                         .unwrap(),

@@ -6,7 +6,7 @@ mod egui_tools;
 use draw_pipeline::DrawPipeline;
 use rand::Rng;
 use regex::Regex;
-use slang_compiler_type_definitions::{
+use slang_playground_compiler::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
     UniformController, UniformSourceData,
 };
@@ -1329,7 +1329,7 @@ impl State {
             pass.set_bind_group(0, pipeline.bind_group.as_ref(), &[]);
             pass.set_pipeline(pipeline.pipeline.as_ref().unwrap());
 
-            use slang_compiler_type_definitions::CallCommandParameters;
+            use slang_playground_compiler::CallCommandParameters;
 
             match &call_command.parameters {
                 CallCommandParameters::ResourceBased(resource_name, element_size) => {
