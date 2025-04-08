@@ -2,7 +2,7 @@ use std::path::Path;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use slang_playground_compiler::SlangCompiler;
+use slang_playground_compiler::slang_compile::SlangCompiler;
 use syn::{
     LitStr, Token,
     parse::{Parse, ParseStream},

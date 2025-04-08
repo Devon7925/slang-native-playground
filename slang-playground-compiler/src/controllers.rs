@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "compilation")]
 use slang_reflector::{ScalarType, UserAttributeParameter, VariableReflectionType};
 use winit::keyboard::Key;
 
@@ -23,10 +24,12 @@ impl UniformControllerType for UniformSlider {
         ui.add(egui::Slider::new(&mut self.value, self.min..=self.max));
     }
 
+    #[cfg(feature = "compilation")]
     fn playground_name() -> String {
         "SLIDER".to_string()
     }
 
+    #[cfg(feature = "compilation")]
     fn construct(
         uniform_type: &VariableReflectionType,
         parameters: &[UserAttributeParameter],
@@ -82,10 +85,12 @@ impl UniformControllerType for UniformColorPick {
         ui.color_edit_button_rgb(&mut self.value);
     }
 
+    #[cfg(feature = "compilation")]
     fn playground_name() -> String {
         "COLOR_PICK".to_string()
     }
 
+    #[cfg(feature = "compilation")]
     fn construct(
         uniform_type: &VariableReflectionType,
         parameters: &[UserAttributeParameter],
@@ -137,10 +142,12 @@ impl UniformControllerType for UniformMousePosition {
         data.iter().map(|x| x.to_le_bytes()).flatten().collect()
     }
 
+    #[cfg(feature = "compilation")]
     fn playground_name() -> String {
         "MOUSE_POSITION".to_string()
     }
 
+    #[cfg(feature = "compilation")]
     fn construct(
         uniform_type: &VariableReflectionType,
         _parameters: &[UserAttributeParameter],
@@ -171,10 +178,12 @@ impl UniformControllerType for UniformTime {
         value.to_le_bytes().to_vec()
     }
 
+    #[cfg(feature = "compilation")]
     fn playground_name() -> String {
         "TIME".to_string()
     }
 
+    #[cfg(feature = "compilation")]
     fn construct(
         uniform_type: &VariableReflectionType,
         _parameters: &[UserAttributeParameter],
@@ -202,10 +211,12 @@ impl UniformControllerType for UniformDeltaTime {
         uniform_source_data.delta_time.to_le_bytes().to_vec()
     }
 
+    #[cfg(feature = "compilation")]
     fn playground_name() -> String {
         "DELTA_TIME".to_string()
     }
 
+    #[cfg(feature = "compilation")]
     fn construct(
         uniform_type: &VariableReflectionType,
         _parameters: &[UserAttributeParameter],
@@ -254,10 +265,12 @@ impl UniformControllerType for UniformKeyInput {
         value.to_le_bytes().to_vec()
     }
 
+    #[cfg(feature = "compilation")]
     fn playground_name() -> String {
         "KEY_INPUT".to_string()
     }
 
+    #[cfg(feature = "compilation")]
     fn construct(
         uniform_type: &VariableReflectionType,
         parameters: &[UserAttributeParameter],

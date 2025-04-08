@@ -15,4 +15,4 @@ serde = { version = "1.0", features = ["derive"] }
 wgpu = { version = "24.0.0", features = ["serde"] }
 base64 = "0.22.1"
 serde_json = "1.0"
-slang-playground-compiler = { path = "../slang-playground-compiler" }
+slang-playground-compiler = { path = "../slang-playground-compiler", features = ["compilation"]}
