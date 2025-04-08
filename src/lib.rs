@@ -966,6 +966,15 @@ impl State {
             .request_adapter(&wgpu::RequestAdapterOptions::default())
             .await
             .unwrap();
+
+        let info = adapter.get_info();
+
+        let info_logging = format!("Running on backend: {}\n", info.backend);
+        #[cfg(not(target_arch = "wasm32"))]
+        print!("{}", info_logging);
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&info_logging.into());
+        
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -1526,14 +1535,6 @@ impl DebugAppState {
             })
             .await
             .expect("Failed to find an appropriate adapter");
-
-        let info = adapter.get_info();
-
-        let info_logging = format!("Running on backend: {}\n", info.backend);
-        #[cfg(not(target_arch = "wasm32"))]
-        print!("{}", info_logging);
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&info_logging.into());
 
         let features = wgpu::Features::empty();
         let (device, queue) = adapter
