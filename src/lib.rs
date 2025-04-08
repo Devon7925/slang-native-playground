@@ -1531,7 +1531,7 @@ impl DebugAppState {
         #[cfg(not(target_arch = "wasm32"))]
         println!("Running on backend: {}", info.backend);
         #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&format!("Running on backend: {}", info.backend));
+        web_sys::console::log_1(&format!("Running on backend: {}", info.backend).into());
 
         let features = wgpu::Features::empty();
         let (device, queue) = adapter
