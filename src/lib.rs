@@ -1527,6 +1527,12 @@ impl DebugAppState {
             .await
             .expect("Failed to find an appropriate adapter");
 
+        let info = adapter.get_info();
+        #[cfg(not(target_arch = "wasm32"))]
+        println!("Running on backend: {}", info.backend);
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&format!("Running on backend: {}", info.backend));
+
         let features = wgpu::Features::empty();
         let (device, queue) = adapter
             .request_device(
