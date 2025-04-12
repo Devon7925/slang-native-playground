@@ -63,7 +63,7 @@ impl DrawPipeline {
         &mut self,
         shader_module: &wgpu::ShaderModule,
         resources: Option<&HashMap<String, GPUResource>>,
-        resource_commands: &HashMap<String, ResourceCommandData>,
+        resource_commands: &HashMap<String, Box<dyn ResourceCommandData>>,
         vertex_entry_point: Option<&str>,
         fragment_entry_point: Option<&str>,
     ) {
@@ -113,7 +113,7 @@ impl DrawPipeline {
     pub fn create_bind_group(
         &mut self,
         allocated_resources: &HashMap<String, GPUResource>,
-        resource_commands: &HashMap<String, ResourceCommandData>,
+        resource_commands: &HashMap<String, Box<dyn ResourceCommandData>>,
     ) {
         let mut entries: Vec<wgpu::BindGroupEntry> = vec![];
         let mut texture_views: HashMap<&String, wgpu::TextureView> = HashMap::new();
@@ -123,8 +123,9 @@ impl DrawPipeline {
         for (name, resource) in allocated_resources.iter() {
             match resource {
                 GPUResource::Buffer(buffer) => {
-                    if let Some(ResourceCommandData::RebindForDraw { original_resource }) =
-                        resource_commands.get(name)
+                    if let Some(original_resource) = resource_commands
+                        .get(name)
+                        .and_then(|c| c.get_rebind_original_resource())
                     {
                         rebound_buffers.insert(original_resource, name);
                     }
@@ -132,8 +133,9 @@ impl DrawPipeline {
                     buffer_bindings.insert(name, buffer_binding);
                 }
                 GPUResource::Texture(texture) => {
-                    if let Some(ResourceCommandData::RebindForDraw { original_resource }) =
-                        resource_commands.get(name)
+                    if let Some(original_resource) = resource_commands
+                        .get(name)
+                        .and_then(|c| c.get_rebind_original_resource())
                     {
                         rebound_textures.insert(original_resource, name);
                     }
@@ -151,8 +153,9 @@ impl DrawPipeline {
                 GPUResource::Buffer(_) => wgpu::BindingResource::Buffer(
                     buffer_bindings
                         .get(
-                            if let Some(ResourceCommandData::RebindForDraw { original_resource }) =
-                                resource_commands.get(name)
+                            if let Some(original_resource) = resource_commands
+                                .get(name)
+                                .and_then(|c| c.get_rebind_original_resource())
                             {
                                 original_resource
                             } else if let Some(replacement) = rebound_buffers.get(&name) {
@@ -167,8 +170,9 @@ impl DrawPipeline {
                 GPUResource::Texture(_) => wgpu::BindingResource::TextureView(
                     texture_views
                         .get(
-                            if let Some(ResourceCommandData::RebindForDraw { original_resource }) =
-                                resource_commands.get(name)
+                            if let Some(original_resource) = resource_commands
+                                .get(name)
+                                .and_then(|c| c.get_rebind_original_resource())
                             {
                                 original_resource
                             } else if let Some(replacement) = rebound_textures.get(&name) {
@@ -201,8 +205,9 @@ impl DrawPipeline {
             }
 
             panic!(
-                "Cannot create bind-group. The following resources are not bound: {}",
-                missing_entries.join(", ")
+                "Cannot create bind-group. The following resources are not bound: {}\nAllocated Resources: {:?}",
+                missing_entries.join(", "),
+                allocated_resources,
             );
         }
 

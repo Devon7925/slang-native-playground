@@ -5,7 +5,6 @@ use std::{
     rc::Rc,
 };
 use strum::IntoEnumIterator;
-use url::Url;
 
 use slang_reflector::{
     BoundParameter, BoundResource, EntrypointReflection, GlobalSession, ProgramLayoutReflector,
@@ -14,7 +13,10 @@ use slang_reflector::{
 };
 use strum_macros::EnumIter;
 
-use crate::{controllers::*, CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData, UniformController, UniformControllerType};
+use crate::{
+    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
+    UniformController, UniformControllerType, resource_commands::*, uniform_controllers::*,
+};
 
 #[derive(EnumIter, Debug, PartialEq, Clone)]
 enum ShaderType {
@@ -43,6 +45,12 @@ pub struct SlangCompiler {
             ) -> Box<dyn UniformControllerType>,
         >,
     >,
+    resource_command_constructors: HashMap<
+        String,
+        Box<
+            dyn Fn(&BoundResource, &[UserAttributeParameter], &str) -> Box<dyn ResourceCommandData>,
+        >,
+    >,
 }
 
 impl Default for SlangCompiler {
@@ -56,7 +64,18 @@ impl Default for SlangCompiler {
         UniformDeltaTime::register(&mut default_controllers);
         UniformKeyInput::register(&mut default_controllers);
 
-        Self::new(default_controllers)
+        let mut default_resource_commands = HashMap::new();
+        ZerosResourceCommand::register(&mut default_resource_commands);
+        RandResourceCommand::register(&mut default_resource_commands);
+        BlackResourceCommand::register(&mut default_resource_commands);
+        Black3DResourceCommand::register(&mut default_resource_commands);
+        BlackScreenResourceCommand::register(&mut default_resource_commands);
+        UrlResourceCommand::register(&mut default_resource_commands);
+        ModelResourceCommand::register(&mut default_resource_commands);
+        SamplerResourceCommand::register(&mut default_resource_commands);
+        RebindForDrawResourceCommand::register(&mut default_resource_commands);
+
+        Self::new(default_controllers, default_resource_commands)
     }
 }
 
@@ -170,11 +189,22 @@ impl SlangCompiler {
                 ) -> Box<dyn UniformControllerType>,
             >,
         >,
+        resource_command_constructors: HashMap<
+            String,
+            Box<
+                dyn Fn(
+                    &BoundResource,
+                    &[UserAttributeParameter],
+                    &str,
+                ) -> Box<dyn ResourceCommandData>,
+            >,
+        >,
     ) -> Self {
         let global_slang_session = slang_reflector::GlobalSession::new().unwrap();
         SlangCompiler {
             global_slang_session,
             uniform_controller_constructors,
+            resource_command_constructors,
         }
     }
 
@@ -290,7 +320,7 @@ impl SlangCompiler {
     fn get_resource_bindings(
         &self,
         reflection: &ProgramReflection,
-        resource_commands: &HashMap<String, ResourceCommandData>,
+        resource_commands: &HashMap<String, Box<dyn ResourceCommandData>>,
     ) -> HashMap<String, wgpu::BindGroupLayoutEntry> {
         let mut resource_descriptors = HashMap::new();
         let mut uniform_input = false;
@@ -313,7 +343,7 @@ impl SlangCompiler {
             let mut visibility = wgpu::ShaderStages::NONE;
             if resource_commands
                 .get(name)
-                .map(is_available_in_compute)
+                .map(|command| command.is_available_in_compute())
                 .unwrap_or(true)
             {
                 visibility |= wgpu::ShaderStages::COMPUTE;
@@ -352,8 +382,8 @@ impl SlangCompiler {
     fn resource_commands_from_attributes(
         &self,
         reflection: &Vec<VariableReflection>,
-    ) -> HashMap<String, ResourceCommandData> {
-        let mut commands: HashMap<String, ResourceCommandData> = HashMap::new();
+    ) -> HashMap<String, Box<dyn ResourceCommandData>> {
+        let mut commands: HashMap<String, Box<dyn ResourceCommandData>> = HashMap::new();
 
         for VariableReflection {
             reflection_type,
@@ -369,406 +399,12 @@ impl SlangCompiler {
                 else {
                     continue;
                 };
-                let command = if playground_attribute_name == "ZEROS" {
-                    let BoundResource::StructuredBuffer {
-                        resource_result: element_type,
-                        ..
-                    } = resource
-                    else {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports buffers"
-                        )
-                    };
-                    let [UserAttributeParameter::Int(count)] = attribute.parameters[..] else {
-                        panic!(
-                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                        )
-                    };
-                    assert!(
-                        count >= 0,
-                        "{playground_attribute_name} count for {name} cannot have negative size",
-                    );
-                    Some(ResourceCommandData::Zeros {
-                        count: count as u32,
-                        element_size: element_type.get_size(),
-                    })
-                } else if playground_attribute_name == "SAMPLER" {
-                    if !matches!(resource, BoundResource::Sampler,) {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports samplers",
-                        )
-                    }
-                    Some(ResourceCommandData::Sampler)
-                } else if playground_attribute_name == "RAND" {
-                    assert!(
-                        matches!(resource, BoundResource::StructuredBuffer{ resource_result: element, ..} if matches!(element, VariableReflectionType::Scalar(ScalarType::Float32))),
-                        "{playground_attribute_name} attribute cannot be applied to {name}, it only supports float buffers"
-                    );
-                    let [UserAttributeParameter::Int(count)] = attribute.parameters[..] else {
-                        panic!(
-                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                        )
-                    };
-                    assert!(
-                        count >= 0,
-                        "{playground_attribute_name} count for {name} cannot have negative size",
-                    );
-                    Some(ResourceCommandData::Rand(count as u32))
-                } else if playground_attribute_name == "BLACK" {
-                    let BoundResource::Texture {
-                        tex_type: TextureType::Dim2,
-                        resource_result: resource_type,
-                        format,
-                        ..
-                    } = resource
-                    else {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 2D textures",
-                        )
-                    };
 
-                    let [
-                        UserAttributeParameter::Int(width),
-                        UserAttributeParameter::Int(height),
-                    ] = attribute.parameters[..]
-                    else {
-                        panic!(
-                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                        )
-                    };
-
-                    assert!(
-                        width >= 0,
-                        "{playground_attribute_name} width for {name} cannot have negative size",
-                    );
-                    assert!(
-                        height >= 0,
-                        "{playground_attribute_name} height for {name} cannot have negative size",
-                    );
-
-                    Some(ResourceCommandData::Black {
-                        width: width as u32,
-                        height: height as u32,
-                        format: get_wgpu_format_from_slang_format(format, resource_type),
-                    })
-                } else if playground_attribute_name == "BLACK_3D" {
-                    let BoundResource::Texture {
-                        tex_type: TextureType::Dim3,
-                        resource_result: resource_type,
-                        format,
-                        ..
-                    } = resource
-                    else {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 3D textures",
-                        )
-                    };
-
-                    let [
-                        UserAttributeParameter::Int(size_x),
-                        UserAttributeParameter::Int(size_y),
-                        UserAttributeParameter::Int(size_z),
-                    ] = attribute.parameters[..]
-                    else {
-                        panic!(
-                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                        )
-                    };
-
-                    macro_rules! check_positive {
-                        ($id:ident) => {
-                            if $id < 0 {
-                                panic!(
-                                    "{playground_attribute_name} {} for {name} cannot have negative size",
-                                    stringify!($id),
-                                )
-                            }
-                        };
-                    }
-
-                    check_positive!(size_x);
-                    check_positive!(size_y);
-                    check_positive!(size_z);
-
-                    Some(ResourceCommandData::Black3D {
-                        size_x: size_x as u32,
-                        size_y: size_y as u32,
-                        size_z: size_z as u32,
-                        format: get_wgpu_format_from_slang_format(format, resource_type),
-                    })
-                } else if playground_attribute_name == "BLACK_SCREEN" {
-                    let BoundResource::Texture {
-                        tex_type: TextureType::Dim2,
-                        resource_result: resource_type,
-                        format,
-                        ..
-                    } = resource
-                    else {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 2D textures",
-                        )
-                    };
-
-                    let [
-                        UserAttributeParameter::Float(width_scale),
-                        UserAttributeParameter::Float(height_scale),
-                    ] = attribute.parameters[..]
-                    else {
-                        panic!(
-                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                        )
-                    };
-
-                    assert!(
-                        width_scale >= 0.0,
-                        "{playground_attribute_name} width for {name} cannot have negative size",
-                    );
-                    assert!(
-                        height_scale >= 0.0,
-                        "{playground_attribute_name} height for {name} cannot have negative size",
-                    );
-
-                    Some(ResourceCommandData::BlackScreen {
-                        width_scale,
-                        height_scale,
-                        format: get_wgpu_format_from_slang_format(format, resource_type),
-                    })
-                } else if playground_attribute_name == "URL" {
-                    let BoundResource::Texture {
-                        tex_type: TextureType::Dim2,
-                        resource_result: resource_type,
-                        format,
-                        ..
-                    } = resource
-                    else {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 2D textures",
-                        )
-                    };
-
-                    let format = get_wgpu_format_from_slang_format(format, resource_type);
-
-                    let [UserAttributeParameter::String(url)] = &attribute.parameters[..] else {
-                        panic!(
-                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                        )
-                    };
-
-                    let parsed_url = Url::parse(&url);
-                    let image_bytes =
-                        if let Err(url::ParseError::RelativeUrlWithoutBase) = parsed_url {
-                            std::fs::read(url).unwrap()
-                        } else {
-                            reqwest::blocking::get(parsed_url.unwrap())
-                                .unwrap()
-                                .bytes()
-                                .unwrap()
-                                .to_vec()
-                        };
-                    let image = image::load_from_memory(&image_bytes).unwrap();
-                    let data = match format {
-                        wgpu::TextureFormat::Rgba8Unorm => image.to_rgba8().to_vec(),
-                        wgpu::TextureFormat::R8Unorm => image
-                            .to_rgba8()
-                            .to_vec()
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| (*i % 4) < 1)
-                            .map(|(_, c)| c)
-                            .cloned()
-                            .collect(),
-                        wgpu::TextureFormat::Rg8Unorm => image
-                            .to_rgba8()
-                            .to_vec()
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| (*i % 4) < 2)
-                            .map(|(_, c)| c)
-                            .cloned()
-                            .collect(),
-                        wgpu::TextureFormat::Rgba32Float => image
-                            .to_rgba32f()
-                            .to_vec()
-                            .iter()
-                            .flat_map(|c| c.to_le_bytes())
-                            .collect(),
-                        wgpu::TextureFormat::Rg32Float => image
-                            .to_rgba32f()
-                            .to_vec()
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| (*i % 4) < 2)
-                            .map(|(_, c)| c)
-                            .flat_map(|c| c.to_le_bytes())
-                            .collect(),
-                        f => panic!("URL unimplemented for image format {f:?}"),
-                    };
-
-                    Some(ResourceCommandData::Url {
-                        data,
-                        width: image.width(),
-                        height: image.height(),
-                        format,
-                    })
-                } else if playground_attribute_name == "MODEL" {
-                    let BoundResource::StructuredBuffer {
-                        resource_result: element_type,
-                        ..
-                    } = resource
-                    else {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {name}, it only supports buffers",
-                        )
-                    };
-                    let VariableReflectionType::Struct(fields) = element_type else {
-                        panic!(
-                            "{playground_attribute_name} attribute cannot be applied to {name}, inner type must be struct",
-                        )
-                    };
-                    let mut field_types = vec![];
-                    for (field_name, field) in fields {
-                        match field_name.as_str() {
-                            "position" => {
-                                if !matches!(
-                                    field,
-                                    VariableReflectionType::Vector(ScalarType::Float32, 3)
-                                ) {
-                                    panic!(
-                                        "Unsupported type for {field_name} field of MODEL struct for {name}"
-                                    )
-                                }
-                                field_types.push(ModelField::Position)
-                            }
-                            "normal" => {
-                                if !matches!(
-                                    field,
-                                    VariableReflectionType::Vector(ScalarType::Float32, 3)
-                                ) {
-                                    panic!(
-                                        "Unsupported type for {field_name} field of MODEL struct for {name}"
-                                    )
-                                }
-                                field_types.push(ModelField::Normal)
-                            }
-                            "uv" => {
-                                if !matches!(
-                                    field,
-                                    VariableReflectionType::Vector(ScalarType::Float32, 3)
-                                ) {
-                                    panic!(
-                                        "Unsupported type for {field_name} field of MODEL struct for {name}"
-                                    )
-                                }
-                                field_types.push(ModelField::TexCoords)
-                            }
-                            field_name => panic!(
-                                "{field_name} is not a valid field for MODEL attribute on {name}, valid fields are: position, normal, uv",
-                            ),
-                        }
-                    }
-
-                    let [UserAttributeParameter::String(path)] = &attribute.parameters[..] else {
-                        panic!(
-                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                        )
-                    };
-
-                    // load obj file from path
-                    let (models, _) = tobj::load_obj(
-                        &path,
-                        &tobj::LoadOptions {
-                            triangulate: true,
-                            ..Default::default()
-                        },
-                    )
-                    .unwrap();
-                    let mut data: Vec<u8> = Vec::new();
-                    for model in models {
-                        let mesh = &model.mesh;
-                        println!(
-                            "cargo::warning=Loading mesh with {} verticies",
-                            mesh.indices.len()
-                        );
-                        for i in 0..mesh.indices.len() {
-                            for field_type in field_types.iter() {
-                                match field_type {
-                                    ModelField::Position => {
-                                        data.extend_from_slice(
-                                            &mesh.positions[3 * mesh.indices[i] as usize]
-                                                .to_le_bytes(),
-                                        );
-                                        data.extend_from_slice(
-                                            &mesh.positions[3 * mesh.indices[i] as usize + 1]
-                                                .to_le_bytes(),
-                                        );
-                                        data.extend_from_slice(
-                                            &mesh.positions[3 * mesh.indices[i] as usize + 2]
-                                                .to_le_bytes(),
-                                        );
-                                        data.extend_from_slice(&1.0f32.to_le_bytes());
-                                    }
-                                    ModelField::Normal => {
-                                        data.extend_from_slice(
-                                            &mesh.normals[3 * mesh.normal_indices[i] as usize]
-                                                .to_le_bytes(),
-                                        );
-                                        data.extend_from_slice(
-                                            &mesh.normals[3 * mesh.normal_indices[i] as usize + 1]
-                                                .to_le_bytes(),
-                                        );
-                                        data.extend_from_slice(
-                                            &mesh.normals[3 * mesh.normal_indices[i] as usize + 2]
-                                                .to_le_bytes(),
-                                        );
-                                        data.extend_from_slice(&1.0f32.to_le_bytes());
-                                    }
-                                    ModelField::TexCoords => {
-                                        data.extend_from_slice(
-                                            &mesh.texcoords[2 * mesh.texcoord_indices[i] as usize]
-                                                .to_le_bytes(),
-                                        );
-                                        data.extend_from_slice(
-                                            &mesh.texcoords
-                                                [2 * mesh.texcoord_indices[i] as usize + 1]
-                                                .to_le_bytes(),
-                                        );
-                                        data.extend_from_slice(&1.0f32.to_le_bytes());
-                                        data.extend_from_slice(&1.0f32.to_le_bytes());
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Some(ResourceCommandData::Model { data })
-                } else if playground_attribute_name == "REBIND_FOR_DRAW" {
-                    assert!(
-                        matches!(
-                            resource,
-                            BoundResource::Texture {
-                                tex_type: TextureType::Dim2,
-                                ..
-                            } | BoundResource::StructuredBuffer { .. }
-                        ),
-                        "{playground_attribute_name} attribute cannot be applied to {name}, it only supports 2D textures and structured buffers",
-                    );
-
-                    let [UserAttributeParameter::String(original_resource)] =
-                        &attribute.parameters[..]
-                    else {
-                        panic!(
-                            "Invalid attribute parameter type for {playground_attribute_name} attribute on {name}"
-                        )
-                    };
-
-                    Some(ResourceCommandData::RebindForDraw {
-                        original_resource: original_resource.clone(),
-                    })
-                } else {
-                    None
-                };
-
-                if let Some(command) = command {
+                if let Some(constructor) = self
+                    .resource_command_constructors
+                    .get(playground_attribute_name)
+                {
+                    let command = constructor(resource, &attribute.parameters, name);
                     commands.insert(name.clone(), command);
                 }
             }
@@ -931,17 +567,6 @@ fn parameter_texture_view_dimension(tex_type: &TextureType) -> wgpu::TextureView
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ModelField {
-    Position,
-    Normal,
-    TexCoords,
-}
-
-fn is_available_in_compute(resource_command: &ResourceCommandData) -> bool {
-    !matches!(resource_command, ResourceCommandData::RebindForDraw { .. })
-}
-
 fn is_available_in_graphics(parameter: &BoundResource) -> bool {
     match parameter {
         BoundResource::Texture {
@@ -961,7 +586,7 @@ fn round_up_to_nearest(size: u64, arg: u64) -> u64 {
     size.div_ceil(arg) * arg
 }
 
-fn get_wgpu_format_from_slang_format(
+pub fn get_wgpu_format_from_slang_format(
     format: &slang_reflector::ImageFormat,
     resource_type: &VariableReflectionType,
 ) -> wgpu::TextureFormat {

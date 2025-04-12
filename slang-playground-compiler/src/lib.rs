@@ -1,6 +1,7 @@
-mod controllers;
+mod resource_commands;
 #[cfg(feature = "compilation")]
 pub mod slang_compile;
+mod uniform_controllers;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -8,52 +9,85 @@ use wgpu::BindGroupLayoutEntry;
 use winit::keyboard::Key;
 
 #[cfg(feature = "compilation")]
-use slang_reflector::{
-    UserAttributeParameter, VariableReflectionType,
-};
+use slang_reflector::{BoundResource, UserAttributeParameter, VariableReflectionType};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub enum ResourceCommandData {
-    Zeros {
-        count: u32,
-        element_size: u32,
-    },
-    Rand(u32),
-    Black {
-        width: u32,
-        height: u32,
-        format: wgpu::TextureFormat,
-    },
-    Black3D {
-        size_x: u32,
-        size_y: u32,
-        size_z: u32,
-        format: wgpu::TextureFormat,
-    },
-    BlackScreen {
-        width_scale: f32,
-        height_scale: f32,
-        format: wgpu::TextureFormat,
-    },
-    Url {
-        data: Vec<u8>,
-        width: u32,
-        height: u32,
-        format: wgpu::TextureFormat,
-    },
-    Model {
-        data: Vec<u8>,
-    },
-    Sampler,
-    RebindForDraw {
-        original_resource: String,
-    },
+#[derive(PartialEq)]
+pub enum ResourceMetadata {
+    Indirect,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ResourceCommand {
-    pub resource_name: String,
-    pub command_data: ResourceCommandData,
+#[derive(Debug, Clone)]
+pub enum GPUResource {
+    Texture(wgpu::Texture),
+    Buffer(wgpu::Buffer),
+    Sampler(wgpu::Sampler),
+}
+
+impl GPUResource {
+    pub fn destroy(&mut self) {
+        match self {
+            GPUResource::Texture(texture) => texture.destroy(),
+            GPUResource::Buffer(buffer) => buffer.destroy(),
+            GPUResource::Sampler(_) => {}
+        }
+    }
+}
+
+pub struct GraphicsAPI<'a> {
+    pub queue: &'a wgpu::Queue,
+    pub device: &'a wgpu::Device,
+    pub resource_bindings: &'a HashMap<String, wgpu::BindGroupLayoutEntry>,
+    pub allocated_resources: &'a mut HashMap<String, GPUResource>,
+}
+
+#[typetag::serde(tag = "type")]
+pub trait ResourceCommandData {
+    fn is_available_in_compute(&self) -> bool {
+        true
+    }
+    fn get_rebind_original_resource(&self) -> Option<&String> {
+        None
+    }
+    fn handle_resize(&self, _api: GraphicsAPI, _resource_name: &String, _new_size: [u32; 2]) {}
+
+    #[cfg(feature = "compilation")]
+    fn playground_name() -> String
+    where
+        Self: Sized;
+
+    #[cfg(feature = "compilation")]
+    fn construct(
+        resource: &BoundResource,
+        parameters: &[UserAttributeParameter],
+        variable_name: &str,
+    ) -> Box<dyn ResourceCommandData>
+    where
+        Self: Sized;
+
+    #[cfg(feature = "compilation")]
+    fn register(
+        set: &mut HashMap<
+            String,
+            Box<
+                dyn Fn(
+                    &BoundResource,
+                    &[UserAttributeParameter],
+                    &str,
+                ) -> Box<dyn ResourceCommandData>,
+            >,
+        >,
+    ) where
+        Self: Sized + 'static,
+    {
+        set.insert(Self::playground_name(), Box::new(Self::construct));
+    }
+
+    fn assign_resources(
+        &self,
+        api: GraphicsAPI,
+        resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
+        resource_name: &String,
+    ) -> Result<GPUResource, ()>;
 }
 
 pub struct UniformSourceData<'a> {
@@ -119,10 +153,10 @@ pub trait UniformControllerType {
                 ) -> Box<dyn UniformControllerType>,
             >,
         >,
-    ) 
-    where
-        Self: Sized + 'static {
-            set.insert(Self::playground_name(), Box::new(Self::construct));
+    ) where
+        Self: Sized + 'static,
+    {
+        set.insert(Self::playground_name(), Box::new(Self::construct));
     }
 }
 
@@ -130,7 +164,7 @@ pub struct CompilationResult {
     pub out_code: String,
     pub entry_group_sizes: HashMap<String, [u64; 3]>,
     pub bindings: HashMap<String, BindGroupLayoutEntry>,
-    pub resource_commands: HashMap<String, ResourceCommandData>,
+    pub resource_commands: HashMap<String, Box<dyn ResourceCommandData>>,
     pub call_commands: Vec<CallCommand>,
     pub draw_commands: Vec<DrawCommand>,
     pub hashed_strings: HashMap<u32, String>,
@@ -157,4 +191,16 @@ pub struct DrawCommand {
     pub vertex_count: u32,
     pub vertex_entrypoint: String,
     pub fragment_entrypoint: String,
+}
+
+pub fn safe_set<K: Into<String>>(
+    map: &mut HashMap<String, GPUResource>,
+    key: K,
+    value: GPUResource,
+) {
+    let string_key = key.into();
+    if let Some(current_entry) = map.get_mut(&string_key) {
+        current_entry.destroy();
+    }
+    map.insert(string_key, value);
 }

@@ -2776,6 +2776,7 @@ dependencies = [
 [[package]]
 name = "slang"
 version = "0.1.0"
+source = "git+https://github.com/Devon7925/slang-rs#c5c157a97eed401318e67fc830be31f25e570205"
 dependencies = [
  "libc",
  "paste",
@@ -2784,13 +2785,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "slang-compiler-type-definitions"
+name = "slang-playground-compiler"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
  "egui",
+ "image",
+ "regex",
+ "reqwest",
  "serde",
+ "slang-reflector",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "tobj",
  "typetag",
+ "url",
  "web-time",
  "wgpu",
  "winit",
@@ -2799,6 +2808,7 @@ dependencies = [
 [[package]]
 name = "slang-reflector"
 version = "0.1.0"
+source = "git+https://github.com/Devon7925/slang-reflector.git#0167c3559c84428be11c7d3a2ff9b13b2e3ab28d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2811,27 +2821,20 @@ name = "slang-shader-macros"
 version = "0.1.0"
 dependencies = [
  "base64",
- "image",
  "proc-macro2",
  "quote",
- "regex",
- "reqwest",
  "ron",
  "serde",
  "serde_json",
- "slang-compiler-type-definitions",
- "slang-reflector",
- "strum 0.27.1",
- "strum_macros 0.27.1",
+ "slang-playground-compiler",
  "syn",
- "tobj",
- "url",
  "wgpu",
 ]
 
 [[package]]
 name = "slang-sys"
 version = "0.1.0"
+source = "git+https://github.com/Devon7925/slang-rs#c5c157a97eed401318e67fc830be31f25e570205"
 dependencies = [
  "bindgen",
  "paste",

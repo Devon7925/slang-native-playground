@@ -4,14 +4,12 @@ mod draw_pipeline;
 mod egui_tools;
 
 use draw_pipeline::DrawPipeline;
-use rand::Rng;
 use regex::Regex;
 use slang_playground_compiler::{
-    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
-    UniformController, UniformSourceData,
+    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, GPUResource, GraphicsAPI,
+    ResourceCommandData, ResourceMetadata, UniformController, UniformSourceData, safe_set,
 };
-use slang_shader_macros::compile_shader;
-use wgpu::{BufferDescriptor, Extent3d, Features};
+use wgpu::{Extent3d, Features};
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, panic, rc::Rc, sync::Arc};
 
@@ -68,7 +66,7 @@ struct State {
     compute_pipelines: HashMap<String, ComputePipeline>,
     draw_pipelines: Vec<DrawPipeline>,
     bindings: HashMap<String, wgpu::BindGroupLayoutEntry>,
-    resource_commands: HashMap<String, ResourceCommandData>,
+    resource_commands: HashMap<String, Box<dyn ResourceCommandData>>,
     call_commands: Vec<CallCommand>,
     draw_commands: Vec<DrawCommand>,
     uniform_components: Rc<RefCell<Vec<UniformController>>>,
@@ -84,38 +82,8 @@ struct State {
     launch_time: web_time::Instant,
 }
 
-#[derive(Debug, Clone)]
-enum GPUResource {
-    Texture(wgpu::Texture),
-    Buffer(wgpu::Buffer),
-    Sampler(wgpu::Sampler),
-}
-
-impl GPUResource {
-    fn destroy(&mut self) {
-        match self {
-            GPUResource::Texture(texture) => texture.destroy(),
-            GPUResource::Buffer(buffer) => buffer.destroy(),
-            GPUResource::Sampler(_) => {}
-        }
-    }
-}
-
-fn safe_set<K: Into<String>>(map: &mut HashMap<String, GPUResource>, key: K, value: GPUResource) {
-    let string_key = key.into();
-    if let Some(current_entry) = map.get_mut(&string_key) {
-        current_entry.destroy();
-    }
-    map.insert(string_key, value);
-}
-
-#[derive(PartialEq)]
-enum ResourceMetadata {
-    Indirect,
-}
-
 fn get_resource_metadata(
-    _resource_commands: &HashMap<String, ResourceCommandData>,
+    _resource_commands: &HashMap<String, Box<dyn ResourceCommandData>>,
     call_commands: &[CallCommand],
 ) -> HashMap<String, Vec<ResourceMetadata>> {
     let mut result: HashMap<String, Vec<ResourceMetadata>> = HashMap::new();
@@ -143,14 +111,12 @@ async fn process_resource_commands(
     queue: &wgpu::Queue,
     device: &wgpu::Device,
     resource_bindings: &HashMap<String, wgpu::BindGroupLayoutEntry>,
-    resource_commands: &HashMap<String, ResourceCommandData>,
+    resource_commands: &HashMap<String, Box<dyn ResourceCommandData>>,
     resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
     uniform_controllers: &Vec<UniformController>,
-    random_pipeline: &mut ComputePipeline,
     uniform_size: u64,
 ) -> HashMap<String, GPUResource> {
     let mut allocated_resources: HashMap<String, GPUResource> = HashMap::new();
-    let current_window_size = [300, 150]; //TODO
 
     safe_set(
         &mut allocated_resources,
@@ -163,493 +129,28 @@ async fn process_resource_commands(
         })),
     );
 
-    let mut unprocessed_resource_commands = resource_commands.clone();
+    let mut unprocessed_resource_commands = resource_commands
+        .iter()
+        .map(|(k, v)| (k.clone(), v))
+        .collect::<HashMap<_, _>>();
     while !unprocessed_resource_commands.is_empty() {
-        let resource_commands: HashMap<String, ResourceCommandData> =
-            std::mem::take(&mut unprocessed_resource_commands);
-
-        for (resource_name, command_data) in resource_commands {
-            match command_data {
-                ResourceCommandData::Zeros {
-                    count,
-                    element_size,
-                } => {
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource ${resource_name} is not defined in the bindings.");
-                    };
-
-                    if !matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
-                        panic!("Resource ${resource_name} is an invalid type for ZEROS");
-                    }
-
-                    let mut usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
-
-                    if resource_metadata
-                        .get(&resource_name)
-                        .unwrap_or(&vec![])
-                        .contains(&ResourceMetadata::Indirect)
-                    {
-                        usage |= wgpu::BufferUsages::INDIRECT;
-                    }
-
-                    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some(&resource_name),
-                        mapped_at_creation: false,
-                        size: (count * element_size) as u64,
-                        usage,
-                    });
-
-                    // Initialize the buffer with zeros.
-                    let zeros = vec![0u8; (count * element_size) as usize];
-                    queue.write_buffer(&buffer, 0, &zeros);
-
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        GPUResource::Buffer(buffer),
-                    );
-                }
-                ResourceCommandData::Model { data } => {
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource ${resource_name} is not defined in the bindings.");
-                    };
-
-                    if !matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
-                        panic!("Resource ${resource_name} is an invalid type for MODEL");
-                    }
-
-                    let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
-
-                    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some(&resource_name),
-                        mapped_at_creation: false,
-                        size: data.len() as u64,
-                        usage,
-                    });
-
-                    // Initialize the buffer with zeros.
-                    queue.write_buffer(&buffer, 0, &data);
-
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        GPUResource::Buffer(buffer),
-                    );
-                }
-                ResourceCommandData::Sampler => {
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource ${resource_name} is not defined in the bindings.");
-                    };
-
-                    if !matches!(binding_info.ty, wgpu::BindingType::Sampler { .. }) {
-                        panic!("Resource ${resource_name} is an invalid type for Sampler");
-                    }
-
-                    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                        label: None,
-                        ..Default::default()
-                    });
-
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        GPUResource::Sampler(sampler),
-                    );
-                }
-                ResourceCommandData::Rand(count) => {
-                    let element_size = 4; // RAND is only valid for floats
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource {} is not defined in the bindings.", resource_name);
-                    };
-
-                    if !matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
-                        panic!("Resource ${resource_name} is an invalid type for RAND");
-                    }
-
-                    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                        label: None,
-                        mapped_at_creation: false,
-                        size: (count * element_size) as u64,
-                        usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_DST),
-                    });
-
-                    // Place a call to a shader that fills the buffer with random numbers.
-
-                    // Dispatch a random number generation shader.
-                    // Alloc resources for the shader.
-                    let mut rand_float_resources: HashMap<String, GPUResource> = HashMap::new();
-
-                    rand_float_resources
-                        .insert("outputBuffer".to_string(), GPUResource::Buffer(buffer));
-
-                    if !rand_float_resources.contains_key("uniformInput") {
-                        rand_float_resources.insert(
-                            "uniformInput".to_string(),
-                            GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-                                label: None,
-                                mapped_at_creation: false,
-                                size: 16,
-                                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                            })),
-                        );
-                    }
-
-                    // Set bindings on the pipeline.
-                    random_pipeline.create_bind_group(&rand_float_resources);
-
-                    let GPUResource::Buffer(seed_buffer) =
-                        rand_float_resources.get("uniformInput").unwrap()
-                    else {
-                        panic!("Invalid state");
-                    };
-                    let mut rng = rand::rng();
-                    let seed_value: &[f32] = &[rng.random::<f32>(), 0.0, 0.0, 0.0];
-                    queue.write_buffer(seed_buffer, 0, bytemuck::cast_slice(seed_value));
-
-                    // Encode commands to do the computation
-                    let mut encoder =
-                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("compute builtin encoder"),
-                        });
-                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("compute builtin pass"),
-                        timestamp_writes: None,
-                    });
-
-                    pass.set_bind_group(0, random_pipeline.bind_group.as_ref(), &[]);
-                    pass.set_pipeline(random_pipeline.pipeline.as_ref().unwrap());
-
-                    let size = [count, 1, 1];
-                    let block_size = random_pipeline.thread_group_size.unwrap();
-                    let work_group_size: Vec<u32> = size
-                        .iter()
-                        .zip(block_size.map(|s| s as u32))
-                        .map(|(size, block_size)| size.div_ceil(block_size))
-                        .collect();
-
-                    pass.dispatch_workgroups(
-                        work_group_size[0],
-                        work_group_size[1],
-                        work_group_size[2],
-                    );
-                    drop(pass);
-
-                    // Finish encoding and submit the commands
-                    let command_buffer = encoder.finish();
-                    queue.submit([command_buffer]);
-
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        rand_float_resources.remove("outputBuffer").unwrap(),
-                    );
-                }
-                ResourceCommandData::Black {
-                    width,
-                    height,
-                    format,
-                } => {
-                    let size = width * height;
-                    let element_size = format.block_copy_size(None).unwrap();
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource {} is not defined in the bindings.", resource_name);
-                    };
-
-                    if !matches!(
-                        binding_info.ty,
-                        wgpu::BindingType::StorageTexture { .. }
-                            | wgpu::BindingType::Texture { .. }
-                    ) {
-                        panic!("Resource {} is an invalid type for BLACK", resource_name);
-                    }
-                    let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST
-                        | wgpu::TextureUsages::RENDER_ATTACHMENT;
-                    if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
-                        usage |= wgpu::TextureUsages::STORAGE_BINDING;
-                    }
-                    let texture = device.create_texture(&wgpu::TextureDescriptor {
-                        label: None,
-                        dimension: wgpu::TextureDimension::D2,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        size: wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        format,
-                        usage,
-                        view_formats: &[],
-                    });
-
-                    // Initialize the texture with zeros.
-                    let zeros = vec![0; (size * element_size) as usize];
-                    queue.write_texture(
-                        texture.as_image_copy(),
-                        &zeros,
-                        wgpu::TexelCopyBufferLayout {
-                            bytes_per_row: Some(width * element_size),
-                            offset: 0,
-                            rows_per_image: None,
-                        },
-                        wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        GPUResource::Texture(texture),
-                    );
-                }
-                ResourceCommandData::Black3D {
-                    size_x,
-                    size_y,
-                    size_z,
-                    format,
-                } => {
-                    let size = size_x * size_y * size_z;
-                    let element_size = format.block_copy_size(None).unwrap();
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource {} is not defined in the bindings.", resource_name);
-                    };
-
-                    if !matches!(
-                        binding_info.ty,
-                        wgpu::BindingType::StorageTexture { .. }
-                            | wgpu::BindingType::Texture { .. }
-                    ) {
-                        panic!("Resource {} is an invalid type for BLACK_3D", resource_name);
-                    }
-                    let mut usage =
-                        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
-                    if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
-                        usage |= wgpu::TextureUsages::STORAGE_BINDING;
-                    }
-                    let texture = device.create_texture(&wgpu::TextureDescriptor {
-                        label: None,
-                        dimension: wgpu::TextureDimension::D3,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        size: wgpu::Extent3d {
-                            width: size_x,
-                            height: size_y,
-                            depth_or_array_layers: size_z,
-                        },
-                        format,
-                        usage,
-                        view_formats: &[],
-                    });
-
-                    // Initialize the texture with zeros.
-                    let zeros = vec![0; (size * element_size) as usize];
-                    queue.write_texture(
-                        texture.as_image_copy(),
-                        &zeros,
-                        wgpu::TexelCopyBufferLayout {
-                            bytes_per_row: Some(size_x * element_size),
-                            offset: 0,
-                            rows_per_image: Some(size_y),
-                        },
-                        wgpu::Extent3d {
-                            width: size_x,
-                            height: size_y,
-                            depth_or_array_layers: size_z,
-                        },
-                    );
-
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        GPUResource::Texture(texture),
-                    );
-                }
-                ResourceCommandData::BlackScreen {
-                    width_scale,
-                    height_scale,
-                    format,
-                } => {
-                    let width = (width_scale * current_window_size[0] as f32) as u32;
-                    let height = (height_scale * current_window_size[1] as f32) as u32;
-                    let size = width * height;
-                    let element_size = format.block_copy_size(None).unwrap();
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource {} is not defined in the bindings.", resource_name);
-                    };
-
-                    if !matches!(
-                        binding_info.ty,
-                        wgpu::BindingType::StorageTexture { .. }
-                            | wgpu::BindingType::Texture { .. }
-                    ) {
-                        panic!("Resource {} is an invalid type for BLACK", resource_name);
-                    }
-                    let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST
-                        | wgpu::TextureUsages::COPY_SRC
-                        | wgpu::TextureUsages::RENDER_ATTACHMENT;
-                    if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
-                        usage |= wgpu::TextureUsages::STORAGE_BINDING;
-                    }
-                    let texture = device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some(&resource_name),
-                        dimension: wgpu::TextureDimension::D2,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        size: wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        format,
-                        usage,
-                        view_formats: &[],
-                    });
-
-                    // Initialize the texture with zeros.
-                    let zeros = vec![0; (size * element_size) as usize];
-                    queue.write_texture(
-                        texture.as_image_copy(),
-                        &zeros,
-                        wgpu::TexelCopyBufferLayout {
-                            bytes_per_row: Some(width * element_size),
-                            offset: 0,
-                            rows_per_image: None,
-                        },
-                        wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                    queue.submit(None);
-
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        GPUResource::Texture(texture),
-                    );
-                }
-                ResourceCommandData::Url {
-                    data,
-                    width,
-                    height,
-                    format,
-                } => {
-                    // Load image from URL and wait for it to be ready.
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource {} is not defined in the bindings.", resource_name);
-                    };
-
-                    let element_size = format.block_copy_size(None).unwrap();
-
-                    if !matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
-                        panic!("Resource ${resource_name} is not a texture.");
-                    }
-                    let texture = device.create_texture(&wgpu::TextureDescriptor {
-                        label: None,
-                        dimension: wgpu::TextureDimension::D2,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        view_formats: &[],
-                        size: wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        format,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_DST
-                            | wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    });
-                    queue.write_texture(
-                        texture.as_image_copy(),
-                        &data,
-                        wgpu::TexelCopyBufferLayout {
-                            bytes_per_row: Some(width * element_size),
-                            offset: 0,
-                            rows_per_image: None,
-                        },
-                        wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                    safe_set(
-                        &mut allocated_resources,
-                        resource_name,
-                        GPUResource::Texture(texture),
-                    );
-                }
-                ref command @ ResourceCommandData::RebindForDraw {
-                    ref original_resource,
-                } => {
-                    let Some(binding_info) = resource_bindings.get(&resource_name) else {
-                        panic!("Resource {} is not defined in the bindings.", resource_name);
-                    };
-
-                    if matches!(binding_info.ty, wgpu::BindingType::Texture { .. }) {
-                        let Some(GPUResource::Texture(tex)) =
-                            allocated_resources.get(original_resource)
-                        else {
-                            unprocessed_resource_commands
-                                .insert(resource_name.to_string(), command.clone());
-                            continue;
-                        };
-
-                        let texture = device.create_texture(&wgpu::TextureDescriptor {
-                            label: None,
-                            dimension: wgpu::TextureDimension::D2,
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            size: wgpu::Extent3d {
-                                width: tex.width(),
-                                height: tex.height(),
-                                depth_or_array_layers: 1,
-                            },
-                            format: tex.format(),
-                            usage: tex.usage(),
-                            view_formats: &[],
-                        });
-                        safe_set(
-                            &mut allocated_resources,
-                            resource_name,
-                            GPUResource::Texture(texture),
-                        );
-                    } else if matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
-                        let Some(GPUResource::Buffer(buf)) =
-                            allocated_resources.get(original_resource)
-                        else {
-                            unprocessed_resource_commands
-                                .insert(resource_name.to_string(), command.clone());
-                            continue;
-                        };
-
-                        let buffer = device.create_buffer(&BufferDescriptor {
-                            label: None,
-                            size: buf.size(),
-                            usage: buf.usage(),
-                            mapped_at_creation: false,
-                        });
-                        safe_set(
-                            &mut allocated_resources,
-                            resource_name,
-                            GPUResource::Buffer(buffer),
-                        );
-                    } else {
-                        panic!(
-                            "Resource {} is an invalid type for REBIND_FOR_DRAW",
-                            resource_name
-                        )
-                    }
-                }
+        unprocessed_resource_commands.retain(|resource_name, command_data| {
+            if let Ok(resource) = command_data.assign_resources(
+                GraphicsAPI {
+                    device,
+                    queue,
+                    allocated_resources: &mut allocated_resources,
+                    resource_bindings,
+                },
+                resource_metadata,
+                &resource_name,
+            ) {
+                safe_set(&mut allocated_resources, resource_name.clone(), resource);
+                false
+            } else {
+                true
             }
-        }
+        });
     }
 
     if !uniform_controllers.is_empty() {
@@ -974,7 +475,7 @@ impl State {
         print!("{}", info_logging);
         #[cfg(target_arch = "wasm32")]
         web_sys::console::log_1(&info_logging.into());
-        
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -993,29 +494,6 @@ impl State {
         let surface = instance.create_surface(window.clone()).unwrap();
         let surface_format = wgpu::TextureFormat::Rgba8Unorm;
 
-        let mut random_pipeline = ComputePipeline::new(device.clone());
-
-        // Load randFloat shader code using the proc macro
-        let compiled_result: CompilationResult =
-            compile_shader!("rand_float.slang", ["src/shaders"]);
-
-        let rand_code = compiled_result.out_code;
-        let rand_group_size = compiled_result
-            .entry_group_sizes
-            .get("computeMain")
-            .unwrap();
-
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("rand float"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&rand_code)),
-        });
-
-        random_pipeline.set_thread_group_size(*rand_group_size);
-        random_pipeline.create_pipeline_layout(compiled_result.bindings);
-
-        // Create the pipeline (without resource bindings for now)
-        random_pipeline.create_pipeline(&module, None, None);
-
         let resource_metadata =
             get_resource_metadata(&compilation.resource_commands, &compilation.call_commands);
 
@@ -1026,7 +504,6 @@ impl State {
             &compilation.resource_commands,
             &resource_metadata,
             &compilation.uniform_controllers,
-            &mut random_pipeline,
             compilation.uniform_size,
         )
         .await;
@@ -1136,88 +613,15 @@ impl State {
         self.configure_surface();
 
         for (resource_name, command_data) in self.resource_commands.iter() {
-            let ResourceCommandData::BlackScreen {
-                format,
-                width_scale,
-                height_scale,
-            } = command_data
-            else {
-                continue;
-            };
-            let width = (width_scale * new_size.width as f32) as u32;
-            let height = (height_scale * new_size.height as f32) as u32;
-            let size = width * height;
-            let element_size = format.block_copy_size(None).unwrap();
-            let Some(binding_info) = self.bindings.get(resource_name) else {
-                panic!("Resource {} is not defined in the bindings.", resource_name);
-            };
-
-            if !matches!(
-                binding_info.ty,
-                wgpu::BindingType::StorageTexture { .. } | wgpu::BindingType::Texture { .. }
-            ) {
-                panic!("Resource {} is an invalid type for BLACK", resource_name);
-            }
-            let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::RENDER_ATTACHMENT;
-            if matches!(binding_info.ty, wgpu::BindingType::StorageTexture { .. }) {
-                usage |= wgpu::TextureUsages::STORAGE_BINDING;
-            }
-            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(resource_name),
-                dimension: wgpu::TextureDimension::D2,
-                mip_level_count: 1,
-                sample_count: 1,
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
+            command_data.handle_resize(
+                GraphicsAPI {
+                    queue: &self.queue,
+                    device: &self.device,
+                    resource_bindings: &self.bindings,
+                    allocated_resources: &mut self.allocated_resources,
                 },
-                format: *format,
-                usage,
-                view_formats: &[],
-            });
-
-            // Initialize the texture with zeros.
-            let zeros = vec![0; (size * element_size) as usize];
-            self.queue.write_texture(
-                texture.as_image_copy(),
-                &zeros,
-                wgpu::TexelCopyBufferLayout {
-                    bytes_per_row: Some(width * element_size),
-                    offset: 0,
-                    rows_per_image: None,
-                },
-                wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-            );
-            let mut encoder = self.device.create_command_encoder(&Default::default());
-            // copy old texture to new texture
-            let Some(GPUResource::Texture(old_texture)) =
-                self.allocated_resources.get(resource_name)
-            else {
-                panic!("Resource {} is not a Texture", resource_name);
-            };
-            encoder.copy_texture_to_texture(
-                old_texture.as_image_copy(),
-                texture.as_image_copy(),
-                wgpu::Extent3d {
-                    width: width.min(old_texture.width()),
-                    height: height.min(old_texture.height()),
-                    depth_or_array_layers: 1,
-                },
-            );
-            self.queue.submit(Some(encoder.finish()));
-
-            safe_set(
-                &mut self.allocated_resources,
-                resource_name.to_string(),
-                GPUResource::Texture(texture),
+                resource_name,
+                [new_size.width, new_size.height],
             );
         }
         for (_, compute_pipeline) in self.compute_pipelines.iter_mut() {
