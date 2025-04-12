@@ -107,5 +107,11 @@ There are examples of use of the extra features in the `examples` folder. These 
 | `cube_raster` | Textured cube rasterizer with basic lighting |
 | `free_flight_camera` | A rasterizer of the Utah Teacup with keyboard control for the camera |
 | `painting` | A simple painting app demonstrating storage textures and indirect dispatch |
-| `voxels` | A voxel rendering engine with simple falling sand physics |
+
+## External Examples
+
+| Name | Description |
+|------|--------|
+| [slang-voxels](https://github.com/Devon7925/slang-voxels) | A voxel rendering engine with simple falling sand physics |
+
 
