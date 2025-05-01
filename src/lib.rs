@@ -946,8 +946,7 @@ impl DebugAppState {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     required_features: features,
-                    required_limits: Default::default(),
-                    memory_hints: Default::default(),
+                    ..Default::default()
                 },
                 None,
             )

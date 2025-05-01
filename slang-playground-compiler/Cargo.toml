@@ -7,7 +7,7 @@ edition = "2024"
 serde = { version = "1.0", features = ["derive"] }
 wgpu = { version = "24.0.0", features = ["serde"] }
 typetag = "0.2"
-bytemuck = "1.21.0"
+bytemuck = "1.23.0"
 winit = "0.30.9"
 web-time = "1.1.0"
 slang-reflector = { git = "https://github.com/Devon7925/slang-reflector.git", optional = true }
@@ -18,7 +18,7 @@ regex = "1.9"
 reqwest = { version = "0.12.15", features = ["blocking"] }
 image = "0.25.6"
 tobj = "4.0"
-rand = "0.9.0"
+rand = "0.9.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 egui = "0.31.0"
