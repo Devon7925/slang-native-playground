@@ -97,6 +97,7 @@ pub struct UniformSourceData<'a> {
     pub mouse_down: bool,
     pub mouse_clicked: bool,
     pub pressed_keys: &'a HashSet<String>,
+    pub frame_count: u64,
 }
 
 impl<'a> UniformSourceData<'a> {
@@ -109,6 +110,7 @@ impl<'a> UniformSourceData<'a> {
             mouse_down: false,
             mouse_clicked: false,
             pressed_keys: keys,
+            frame_count: 0,
         }
     }
 }

@@ -79,6 +79,7 @@ struct State {
     delta_time: f32,
     last_frame_time: web_time::Instant,
     launch_time: web_time::Instant,
+    frame_count: u64,
 }
 
 fn get_resource_metadata(
@@ -578,6 +579,7 @@ impl State {
             delta_time: 0.0,
             last_frame_time: web_time::Instant::now(),
             launch_time: web_time::Instant::now(),
+            frame_count: 0,
         };
 
         // Configure surface for the first time
@@ -692,6 +694,7 @@ impl State {
         let frame_time = now - self.last_frame_time;
         self.delta_time = frame_time.as_secs_f32();
         self.last_frame_time = now;
+        self.frame_count += 1;
 
         let uniform_source_data = UniformSourceData {
             launch_time: self.launch_time,
@@ -707,6 +710,7 @@ impl State {
             mouse_down: self.mouse_state.is_mouse_down,
             mouse_clicked: self.mouse_state.mouse_clicked,
             pressed_keys: &self.keyboard_state.pressed_keys,
+            frame_count: self.frame_count,
         };
 
         for UniformController {

@@ -202,6 +202,40 @@ impl UniformControllerType for UniformTime {
 }
 
 #[derive(Deserialize, Serialize)]
+pub struct UniformFrameId;
+
+#[typetag::serde]
+impl UniformControllerType for UniformFrameId {
+    fn get_data(&self, uniform_source_data: &UniformSourceData) -> Vec<u8> {
+        let value = uniform_source_data.frame_count as f32;
+        value.to_le_bytes().to_vec()
+    }
+
+    #[cfg(feature = "compilation")]
+    fn playground_name() -> String {
+        "FRAME_ID".to_string()
+    }
+
+    #[cfg(feature = "compilation")]
+    fn construct(
+        uniform_type: &VariableReflectionType,
+        _parameters: &[UserAttributeParameter],
+        variable_name: &str,
+    ) -> Box<dyn UniformControllerType> {
+        assert!(
+            matches!(
+                uniform_type,
+                VariableReflectionType::Scalar(ScalarType::Float32)
+            ),
+            "{} attribute cannot be applied to {variable_name}, it only supports float uniforms",
+            Self::playground_name()
+        );
+
+        Box::new(UniformTime)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct UniformDeltaTime;
 
 #[typetag::serde]
