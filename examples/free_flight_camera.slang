@@ -27,7 +27,7 @@ uniform float sPressed;
 uniform float dPressed;
 [playground::KEY("Space")]
 uniform float spacePressed;
-[playground::KEY("LeftShift")]
+[playground::KEY("ShiftLeft")]
 uniform float shiftPressed;
 
 [playground::DELTA_TIME]
