@@ -3,12 +3,6 @@ public struct playground_DELTA_TIMEAttribute
 {
 };
 
-[__AttributeUsage(_AttributeTargets.Var)]
-public struct playground_KEY_INPUTAttribute
-{
-    string key;
-};
-
 // type field: 1 for format string, 2 for normal string, 3 for integer, 4 for float, 5 for double,
 struct FormattedStruct
 {
@@ -30,26 +24,14 @@ interface IPrintf
 
 extension uint : IPrintf
 {
-    uint32_t typeFlag()
-    {
-        return 3;
-    }
-    uint32_t writePrintfWords()
-    {
-        return (uint32_t)this;
-    }
+    uint32_t typeFlag() { return 3;}
+    uint32_t writePrintfWords() { return (uint32_t)this; }
 }
 
 extension int : IPrintf
 {
-    uint32_t typeFlag()
-    {
-        return 3;
-    }
-    uint32_t writePrintfWords()
-    {
-        return (uint32_t)this;
-    }
+    uint32_t typeFlag() { return 3;}
+    uint32_t writePrintfWords() { return (uint32_t)this; }
 }
 
 // extension int64_t : IPrintf
@@ -64,14 +46,8 @@ extension int : IPrintf
 
 extension float : IPrintf
 {
-    uint32_t typeFlag()
-    {
-        return 4;
-    }
-    uint32_t writePrintfWords()
-    {
-        return bit_cast<uint32_t>(this);
-    }
+    uint32_t typeFlag() { return 4;}
+    uint32_t writePrintfWords() { return bit_cast<uint32_t>(this); }
 }
 
 // extension double : IPrintf
@@ -81,27 +57,19 @@ extension float : IPrintf
 
 extension String : IPrintf
 {
-    uint32_t typeFlag()
-    {
-        return 2;
-    }
-    uint32_t writePrintfWords()
-    {
-        return getStringHash(this);
-    }
+    uint32_t typeFlag() { return 2;}
+    uint32_t writePrintfWords() { return getStringHash(this); }
 }
 
-void handleEach<T>(T value, int index)
-    where T : IPrintf
+void handleEach<T>(T value, int index) where T :  IPrintf
 {
     g_printedBuffer[index].type = value.typeFlag();
     g_printedBuffer[index].low = value.writePrintfWords();
 }
 
-public void print<each T>(String format, expand each T values)
-    where T : IPrintf
+public void print<each T>(String format, expand each T values) where T : IPrintf
 {
-    // if (format.length != 0)
+    //if (format.length != 0)
     {
         g_printedBuffer[g_printBufferIndex].type = 1;
         g_printedBuffer[g_printBufferIndex].low = getStringHash(format);
@@ -113,8 +81,7 @@ public void print<each T>(String format, expand each T values)
 }
 
 [OverloadRank(1)]
-public void printf<each T>(String format, expand each T values)
-    where T : IPrintf
+public void printf<each T>(String format, expand each T values) where T : IPrintf
 {
     print(format, expand each values);
 }
@@ -134,14 +101,6 @@ public struct playground_BLACKAttribute
     int height;
 };
 
-[__AttributeUsage(_AttributeTargets.Var)]
-public struct playground_BLACK_3DAttribute
-{
-    uint sizeX;
-    uint sizeY;
-    uint sizeZ;
-};
-
 // Initialize a \`float\` texture with zeros of a size proportional to the screen size.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_BLACK_SCREENAttribute
@@ -157,6 +116,12 @@ public struct playground_URLAttribute
     string url;
 };
 
+// Bind a sampler with reasonable defaults for texture sampling.
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_SAMPLERAttribute
+{
+};
+
 // Initialize a \`float\` buffer with uniform random floats between 0 and 1.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_RANDAttribute
@@ -164,15 +129,17 @@ public struct playground_RANDAttribute
     int count;
 };
 
-[__AttributeUsage(_AttributeTargets.Var)]
-public struct playground_SAMPLERAttribute
-{
-};
-
 // Gives the current time in milliseconds.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_TIMEAttribute
-{};
+{
+};
+
+// Gives the current shader playback frame index.
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_FRAME_IDAttribute
+{
+};
 
 // Gives mouse position info.
 // \`xy\`: mouse position (in pixels) during last button down.
@@ -181,7 +148,15 @@ public struct playground_TIMEAttribute
 // \`sign(mouze.w)\`: button is clicked
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_MOUSE_POSITIONAttribute
-{};
+{
+};
+
+// Checks if a given key is down. `1.0` if key is down, `0.0` otherwise. Key name comes from either javascript `event.code` or `event.key`.
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_KEYAttribute
+{
+    string keyName;
+};
 
 // Control a \`float\` uniform with a provided default, minimum, and maximum.
 [__AttributeUsage(_AttributeTargets.Var)]

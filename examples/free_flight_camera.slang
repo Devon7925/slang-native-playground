@@ -17,17 +17,17 @@ RWStructuredBuffer<float> gameData;
 [playground::REBIND_FOR_DRAW("gameData")]
 StructuredBuffer<float> drawPlayerData;
 
-[playground::KEY_INPUT("W")]
+[playground::KEY("KeyW")]
 uniform float wPressed;
-[playground::KEY_INPUT("A")]
+[playground::KEY("KeyA")]
 uniform float aPressed;
-[playground::KEY_INPUT("S")]
+[playground::KEY("KeyS")]
 uniform float sPressed;
-[playground::KEY_INPUT("D")]
+[playground::KEY("KeyD")]
 uniform float dPressed;
-[playground::KEY_INPUT("Space")]
+[playground::KEY("Space")]
 uniform float spacePressed;
-[playground::KEY_INPUT("Shift")]
+[playground::KEY("LeftShift")]
 uniform float shiftPressed;
 
 [playground::DELTA_TIME]

@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "compilation")]
 use slang_reflector::{ScalarType, UserAttributeParameter, VariableReflectionType};
-use winit::keyboard::Key;
 
 use crate::{UniformControllerType, UniformSourceData};
 
@@ -243,21 +242,7 @@ pub struct UniformKeyInput {
 #[typetag::serde]
 impl UniformControllerType for UniformKeyInput {
     fn get_data(&self, uniform_source_data: &UniformSourceData) -> Vec<u8> {
-        let keycode = match self.key.to_lowercase().as_str() {
-            "enter" => Key::Named(winit::keyboard::NamedKey::Enter),
-            "space" => Key::Named(winit::keyboard::NamedKey::Space),
-            "shift" => Key::Named(winit::keyboard::NamedKey::Shift),
-            "ctrl" => Key::Named(winit::keyboard::NamedKey::Control),
-            "escape" => Key::Named(winit::keyboard::NamedKey::Escape),
-            "backspace" => Key::Named(winit::keyboard::NamedKey::Backspace),
-            "tab" => Key::Named(winit::keyboard::NamedKey::Tab),
-            "arrowup" => Key::Named(winit::keyboard::NamedKey::ArrowUp),
-            "arrowdown" => Key::Named(winit::keyboard::NamedKey::ArrowDown),
-            "arrowleft" => Key::Named(winit::keyboard::NamedKey::ArrowLeft),
-            "arrowright" => Key::Named(winit::keyboard::NamedKey::ArrowRight),
-            k => Key::Character(k.into()),
-        };
-        let value = if uniform_source_data.pressed_keys.contains(&keycode) {
+        let value = if uniform_source_data.pressed_keys.contains(&self.key) {
             1.0f32
         } else {
             0.0f32
@@ -267,7 +252,7 @@ impl UniformControllerType for UniformKeyInput {
 
     #[cfg(feature = "compilation")]
     fn playground_name() -> String {
-        "KEY_INPUT".to_string()
+        "KEY".to_string()
     }
 
     #[cfg(feature = "compilation")]

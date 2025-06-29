@@ -57,18 +57,6 @@ Acts the same as `BLACK` but for 3d textures.
 
 Takes a buffer and a offset and makes an indirect dispatch using them. The buffer is not accessible from the shader being called.
 
-### `playground::KEY_INPUT`
-
-Allows to control a uniform float based on a key with `1.0` meaning pressed and `0.0` meaning released.
-
-Example:
-```slang
-[playground::KEY_INPUT("Space")]
-uniform float spacePressed;
-[playground::KEY_INPUT("W")] 
-uniform float wPressed;
-```
-
 ### `playground::MODEL`
 
 Allows loading *.obj files into a buffer. Element type must be a struct with only `position`, `normal`, and `uv` fields.

@@ -20,7 +20,6 @@ use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, SmolStr},
     window::{Window, WindowId},
 };
 
@@ -37,7 +36,7 @@ struct MouseState {
 }
 
 struct KeyboardState {
-    pressed_keys: HashSet<Key>,
+    pressed_keys: HashSet<String>,
 }
 
 impl KeyboardState {
@@ -47,11 +46,11 @@ impl KeyboardState {
         }
     }
 
-    fn key_pressed(&mut self, key: Key) {
+    fn key_pressed(&mut self, key: String) {
         self.pressed_keys.insert(key);
     }
 
-    fn key_released(&mut self, key: Key) {
+    fn key_released(&mut self, key: String) {
         self.pressed_keys.remove(&key);
     }
 }
@@ -890,11 +889,11 @@ impl State {
         self.mouse_state.is_mouse_down = false;
     }
 
-    fn key_pressed(&mut self, key: Key) {
+    fn key_pressed(&mut self, key: String) {
         self.keyboard_state.key_pressed(key);
     }
 
-    fn key_released(&mut self, key: Key) {
+    fn key_released(&mut self, key: String) {
         self.keyboard_state.key_released(key);
     }
 }
@@ -1281,10 +1280,21 @@ impl ApplicationHandler for App {
                 device_id: _,
                 is_synthetic: _,
             } => {
-                let keycode = remove_modifiers(event.logical_key);
+                let event_code = match event.physical_key {
+                    winit::keyboard::PhysicalKey::Code(code) => format!("{:?}", code),
+                    winit::keyboard::PhysicalKey::Unidentified(code) => format!("{:?}", code),
+                };
+                let event_key = event.logical_key.to_text().unwrap_or("").to_string();
+
                 match event.state {
-                    ElementState::Pressed => state.key_pressed(keycode),
-                    ElementState::Released => state.key_released(keycode),
+                    ElementState::Pressed => {
+                        state.key_pressed(event_code);
+                        state.key_pressed(event_key);
+                    },
+                    ElementState::Released => {
+                        state.key_released(event_code);
+                        state.key_released(event_key);
+                    }
                 }
             }
             _ => (),
@@ -1355,13 +1365,6 @@ impl ApplicationHandler for App {
                 self.handle_redraw();
             }
         }
-    }
-}
-
-fn remove_modifiers(key: Key<SmolStr>) -> Key<SmolStr> {
-    match key {
-        Key::Character(c) => Key::Character(c.to_lowercase().into()),
-        k => k,
     }
 }
 

@@ -6,7 +6,6 @@ mod uniform_controllers;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use wgpu::BindGroupLayoutEntry;
-use winit::keyboard::Key;
 
 #[cfg(feature = "compilation")]
 use slang_reflector::{BoundResource, UserAttributeParameter, VariableReflectionType};
@@ -97,11 +96,11 @@ pub struct UniformSourceData<'a> {
     pub last_mouse_clicked_pos: [f32; 2],
     pub mouse_down: bool,
     pub mouse_clicked: bool,
-    pub pressed_keys: &'a HashSet<Key>,
+    pub pressed_keys: &'a HashSet<String>,
 }
 
 impl<'a> UniformSourceData<'a> {
-    pub fn new(keys: &'a HashSet<Key>) -> Self {
+    pub fn new(keys: &'a HashSet<String>) -> Self {
         Self {
             launch_time: web_time::Instant::now(),
             delta_time: 0.0,
