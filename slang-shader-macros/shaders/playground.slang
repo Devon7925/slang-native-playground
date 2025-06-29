@@ -101,6 +101,15 @@ public struct playground_BLACKAttribute
     int height;
 };
 
+// Initialize a \`float\` texture with zeros of the provided size.
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_BLACK_3DAttribute
+{
+    uint sizeX;
+    uint sizeY;
+    uint sizeZ;
+};
+
 // Initialize a \`float\` texture with zeros of a size proportional to the screen size.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_BLACK_SCREENAttribute

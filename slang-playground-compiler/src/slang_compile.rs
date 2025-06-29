@@ -60,6 +60,7 @@ impl Default for SlangCompiler {
         UniformSlider::register(&mut default_controllers);
         UniformColorPick::register(&mut default_controllers);
         UniformTime::register(&mut default_controllers);
+        UniformFrameId::register(&mut default_controllers);
         UniformMousePosition::register(&mut default_controllers);
         UniformDeltaTime::register(&mut default_controllers);
         UniformKeyInput::register(&mut default_controllers);
