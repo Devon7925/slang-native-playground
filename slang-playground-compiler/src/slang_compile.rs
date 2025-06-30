@@ -1,8 +1,6 @@
 use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ops::Deref,
-    rc::Rc,
 };
 use strum::IntoEnumIterator;
 
@@ -81,21 +79,7 @@ impl Default for SlangCompiler {
 }
 
 #[derive(Clone)]
-struct CustomFileSystem {
-    used_files: Rc<RefCell<HashSet<String>>>,
-}
-
-impl CustomFileSystem {
-    fn new() -> Self {
-        Self {
-            used_files: Rc::new(RefCell::new(HashSet::new())),
-        }
-    }
-
-    fn get_files(&self) -> Rc<RefCell<HashSet<String>>> {
-        self.used_files.clone()
-    }
-}
+struct CustomFileSystem;
 
 impl slang_reflector::FileSystem for CustomFileSystem {
     fn load_file(&self, path: &str) -> slang_reflector::Result<slang_reflector::Blob> {
@@ -162,12 +146,10 @@ impl slang_reflector::FileSystem for CustomFileSystem {
             let response = response.text().map_err(|e| {
                 slang_reflector::Error::Blob(slang_reflector::Blob::from(e.to_string()))
             })?;
-            self.used_files.borrow_mut().insert(path.clone());
             return Ok(slang_reflector::Blob::from(response.into_bytes()));
         } else {
             match std::fs::read(&path) {
                 Ok(bytes) => {
-                    self.used_files.borrow_mut().insert(path);
                     Ok(slang_reflector::Blob::from(bytes))
                 }
                 Err(e) => Err(slang_reflector::Error::Blob(slang_reflector::Blob::from(
@@ -212,16 +194,19 @@ impl SlangCompiler {
     fn add_components(
         &self,
         slang_session: &slang_reflector::Session,
-        used_files: impl IntoIterator<Item = String>,
+        used_files: impl Iterator<Item = String>,
         component_list: &mut Vec<slang_reflector::ComponentType>,
     ) {
         for imported_file in used_files {
+            let re = regex::Regex::new(":[0-9A-F]+$").unwrap();
+            let file = re.replace(&imported_file, "").to_string();
+            
             let module = slang_session
-                .load_module(&imported_file)
+                .load_module(&file)
                 .unwrap_or_else(|e| {
                     panic!(
                         "Failed to load module {}: {:?}",
-                        imported_file,
+                        file,
                         e.to_string()
                     )
                 });
@@ -471,7 +456,7 @@ impl SlangCompiler {
             .format(slang_reflector::CompileTarget::Wgsl)
             .profile(self.global_slang_session.find_profile("spirv_1_6"));
 
-        let custom_file_system = CustomFileSystem::new();
+        let custom_file_system = CustomFileSystem;
 
         let targets = [target_desc];
 
@@ -509,9 +494,8 @@ impl SlangCompiler {
                 panic!("User defined playground entrypoint {}", name)
             }
         }
-
-        let used_files = custom_file_system.get_files().borrow().clone();
-        self.add_components(&slang_session, used_files, &mut components);
+        
+        self.add_components(&slang_session, user_module.dependency_file_paths().map(|p| p.to_string()), &mut components);
 
         let program = slang_session
             .create_composite_component_type(components.as_slice())
