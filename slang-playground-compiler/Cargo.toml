@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-wgpu = { version = "24.0.0", features = ["serde"] }
+wgpu = { version = "25.0.0", features = ["serde"] }
 typetag = "0.2"
 bytemuck = "1.23.0"
 winit = "0.30.9"
@@ -21,7 +21,7 @@ tobj = "4.0"
 rand = "0.9.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-egui = "0.31.0"
+egui = "0.32.0"
 
 [features]
 compilation = ["dep:slang-reflector"]

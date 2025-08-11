@@ -6,9 +6,9 @@ edition = "2024"
 [dependencies]
 env_logger = "0.11.6"
 pollster = "0.4.0"
-wgpu = { version = "24.0.0", features = ["serde"] }
-winit = "0.30.10"
-bytemuck = "1.23.0"
+wgpu = { version = "25.0.0", features = ["serde"] }
+winit = "0.30.12"
+bytemuck = "1.23.2"
 regex = "1.11.1"
 serde = { version = "1.0.217", features = ["derive"] }
 ron = "0.10.1"
@@ -20,7 +20,7 @@ slang-shader-macros = { path = "slang-shader-macros" }
 slang-renderer = { path = "slang-renderer" }
 
 [dependencies.egui-winit]
-version = "0.31.1"
+version = "0.32.0"
 # Required for compiling to WASM
 default-features = false
 features = ["links", "wayland", "x11"]
@@ -34,8 +34,5 @@ js-sys = "0.3.77"
 wasm-bindgen-futures = "0.4.50"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-egui-wgpu = "0.31.0"
-egui = "0.31.0"
-
-[patch.crates-io]
-wgpu = { git = "https://github.com/gfx-rs/wgpu.git", rev = "d6ca412" }
+egui-wgpu = "0.32.0"
+egui = "0.32.0"

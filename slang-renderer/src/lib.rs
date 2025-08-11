@@ -463,7 +463,6 @@ impl Renderer {
                     required_features: Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                     ..Default::default()
                 },
-                None, // Trace path
             )
             .await
             .unwrap();

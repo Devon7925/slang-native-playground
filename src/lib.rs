@@ -66,7 +66,6 @@ impl DebugAppState {
                     required_features: features,
                     ..Default::default()
                 },
-                None,
             )
             .await
             .expect("Failed to create device");
@@ -139,6 +138,21 @@ impl App {
             debug_app: None,
             compilation: Some(compilation),
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn ensure_state_is_loaded(&mut self) -> bool {
+        if self.state.is_some() {
+            return true;
+        }
+
+        if let Some(receiver) = self.state_receiver.as_mut() {
+            if let Ok(Some(state)) = receiver.try_recv() {
+                self.state = Some(state);
+                self.state_receiver = None;
+            }
+        }
+        self.state.is_some()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -326,19 +340,8 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         #[cfg(target_arch = "wasm32")]
-        if self.state.is_none() {
-            let mut renderer_received = false;
-            if let Some(receiver) = self.state_receiver.as_mut() {
-                if let Ok(Some(state)) = receiver.try_recv() {
-                    self.state = Some(state);
-                    renderer_received = true;
-                }
-            }
-            if renderer_received {
-                self.state_receiver = None;
-            } else {
-                return;
-            }
+        if !self.ensure_state_is_loaded() {
+            return; // Still loading, skip event
         }
         #[cfg(not(target_arch = "wasm32"))]
         if self
@@ -381,20 +384,10 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         #[cfg(target_arch = "wasm32")]
-        if self.state.is_none() {
-            let mut renderer_received = false;
-            if let Some(receiver) = self.state_receiver.as_mut() {
-                if let Ok(Some(state)) = receiver.try_recv() {
-                    self.state = Some(state);
-                    renderer_received = true;
-                }
-            }
-            if renderer_received {
-                self.state_receiver = None;
-            } else {
-                return;
-            }
+        if !self.ensure_state_is_loaded() {
+            return; // Still loading, skip event
         }
+
         let state = self.state.as_mut().unwrap();
         #[cfg(not(target_arch = "wasm32"))]
         state.render();
