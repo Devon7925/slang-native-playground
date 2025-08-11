@@ -17,6 +17,7 @@ web-time = "1.1.0"
 futures = "0.3.31"
 slang-playground-compiler = { path = "slang-playground-compiler" }
 slang-shader-macros = { path = "slang-shader-macros" }
+slang-renderer = { path = "slang-renderer" }
 
 [dependencies.egui-winit]
 version = "0.31.1"

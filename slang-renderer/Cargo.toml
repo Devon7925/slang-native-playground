@@ -1,0 +1,16 @@
+[package]
+name = "slang-renderer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wgpu = { version = "24.0.0", features = ["serde"] }
+winit = "0.30.10"
+bytemuck = "1.23.0"
+regex = "1.11.1"
+futures = "0.3.31"
+web-time = "1.1.0"
+slang-playground-compiler = { path = "../slang-playground-compiler" }
+
+[patch.crates-io]
+wgpu = { git = "https://github.com/gfx-rs/wgpu.git", rev = "d6ca412" }

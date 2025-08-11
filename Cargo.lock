@@ -3127,6 +3127,7 @@ dependencies = [
  "ron",
  "serde",
  "slang-playground-compiler",
+ "slang-renderer",
  "slang-shader-macros",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3164,6 +3165,19 @@ version = "0.1.0"
 source = "git+https://github.com/Devon7925/slang-reflector.git#90b18ecec172397e2dfdfcf113607d687769755d"
 dependencies = [
  "slang",
+]
+
+[[package]]
+name = "slang-renderer"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "futures",
+ "regex",
+ "slang-playground-compiler",
+ "web-time",
+ "wgpu",
+ "winit",
 ]
 
 [[package]]
