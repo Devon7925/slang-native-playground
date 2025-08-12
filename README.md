@@ -28,15 +28,12 @@ Depends on [slang-rs](https://github.com/FloatyMonkey/slang-rs). See that repo i
 | Graphics Entrypoints | ❌ | Compilation only support not planned |
 | Atomics | ✅ | |
 
-
-
-
-
 ## Extra features
 
 This app also has a number of additional features that are not(yet) in the official playground.
 
 ### `[playground::DELTA_TIME]`
+
 Controls a float uniform to give the difference in time between frames. Useful for making things not break at high framerates.
 
 ### `playground::BLACK_SCREEN`
@@ -101,5 +98,3 @@ There are examples of use of the extra features in the `examples` folder. These 
 | Name | Description |
 |------|--------|
 | [slang-voxels](https://github.com/Devon7925/slang-voxels) | A voxel rendering engine with simple falling sand physics |
-
-
