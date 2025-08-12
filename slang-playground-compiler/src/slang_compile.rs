@@ -2,14 +2,13 @@ use std::{
     collections::HashMap,
     ops::Deref,
 };
-use strum::IntoEnumIterator;
+use strum::{EnumIter, IntoEnumIterator};
 
 use slang_reflector::{
     BoundParameter, BoundResource, EntrypointReflection, GlobalSession, ProgramLayoutReflector,
     ProgramReflection, ResourceAccess, ScalarType, TextureType, UserAttributeParameter,
     VariableReflection, VariableReflectionType,
 };
-use strum_macros::EnumIter;
 
 use crate::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,

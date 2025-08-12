@@ -85,7 +85,7 @@ If you have rate limit issues you can create a github personal access token and 
 
 ## Examples
 
-There are examples of use of the extra features in the `examples` folder. These can be run using `cargo run --example`. For example `cargo run --example cube_raster`.
+There are examples of use of the extra features in the `examples` folder. These can be run using `cargo run -p examples --example`. For example `cargo run -p examples --example cube_raster`.
 
 | Name | Description |
 |------|--------|

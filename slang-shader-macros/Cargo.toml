@@ -7,12 +7,17 @@ edition = "2024"
 proc-macro = true
 
 [dependencies]
-syn = { version = "2.0.101", features = ["full", "extra-traits"] }
-quote = "1.0"
-proc-macro2 = "1.0.95"
-ron = "0.10.1"
-serde = { version = "1.0", features = ["derive"] }
-wgpu = { version = "24.0.0", features = ["serde"] }
-base64 = "0.22.1"
-serde_json = "1.0"
-slang-playground-compiler = { path = "../slang-playground-compiler", features = ["compilation"]}
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+ron = { workspace = true }
+serde = { workspace = true }
+wgpu = { workspace = true }
+base64 = { workspace = true }
+serde_json = { workspace = true }
+slang-playground-compiler = { workspace = true, features = ["compilation"]}
+
+
+[features]
+default = []
+compilation = []
