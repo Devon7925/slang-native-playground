@@ -3146,6 +3146,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "slang-debug-app"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "pollster",
+ "slang-playground-compiler",
+ "slang-renderer",
+ "web-time",
+ "wgpu 25.0.2",
+ "winit",
+]
+
+[[package]]
 name = "slang-native-playground"
 version = "0.1.0"
 dependencies = [
@@ -3163,6 +3178,7 @@ dependencies = [
  "regex",
  "ron",
  "serde",
+ "slang-debug-app",
  "slang-playground-compiler",
  "slang-renderer",
  "slang-shader-macros",
@@ -3209,9 +3225,15 @@ name = "slang-renderer"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "console_error_panic_hook",
  "futures",
+ "getrandom 0.3.2",
+ "js-sys",
  "regex",
  "slang-playground-compiler",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "web-time",
  "wgpu 25.0.2",
  "winit",

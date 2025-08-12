@@ -36,3 +36,4 @@ wasm-bindgen-futures = "0.4.50"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 egui-wgpu = "0.32.0"
 egui = "0.32.0"
+slang-debug-app = { path = "slang-debug-app" }

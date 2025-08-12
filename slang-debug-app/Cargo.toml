@@ -1,0 +1,16 @@
+
+[package]
+name = "slang-debug-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+winit = "0.30.12"
+wgpu = { version = "25.0.0", features = ["serde"] }
+egui-wgpu = "0.32.0"
+egui = "0.32.0"
+web-time = "1.1.0"
+pollster = "0.4.0"
+slang-playground-compiler = { path = "../slang-playground-compiler" }
+slang-renderer = { path = "../slang-renderer" }
+egui-winit = { version = "0.32.0", default-features = false, features = ["links", "wayland", "x11"] }

@@ -11,3 +11,11 @@ regex = "1.11.1"
 futures = "0.3.31"
 web-time = "1.1.0"
 slang-playground-compiler = { path = "../slang-playground-compiler" }
+
+[target.wasm32-unknown-unknown.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+console_error_panic_hook = "0.1.7"
+wasm-bindgen = "0.2.100"
+web-sys = "0.3.77"
+js-sys = "0.3.77"
+wasm-bindgen-futures = "0.4.50"

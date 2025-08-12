@@ -837,8 +837,7 @@ impl Renderer {
         match event {
             #[cfg(target_arch = "wasm32")]
             WindowEvent::RedrawRequested => {
-                let state = self.state.as_mut().unwrap();
-                state.render();
+                self.render();
             }
             WindowEvent::Resized(size) => {
                 // reconfigure the surface
