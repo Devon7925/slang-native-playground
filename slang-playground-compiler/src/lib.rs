@@ -86,6 +86,7 @@ pub trait ResourceCommandData {
         api: GraphicsAPI,
         resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
+        window_size: [u32; 2],
     ) -> Result<GPUResource, ()>;
 }
 

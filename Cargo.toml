@@ -20,8 +20,12 @@ ron = "0.10.1"
 flume = "0.11.1"
 web-time = "1.1.0"
 futures = "0.3.31"
-egui-winit = { version = "0.32.0", default-features = false, features = ["links", "wayland", "x11"] }
-getrandom = { version = "0.2.16", features = ["js"] }
+egui-winit = { version = "0.32.0", default-features = false, features = [
+    "links",
+    "wayland",
+    "x11",
+] }
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
 console_error_panic_hook = "0.1.7"
 wasm-bindgen = "0.2.100"
 web-sys = "0.3.77"
@@ -30,7 +34,7 @@ wasm-bindgen-futures = "0.4.50"
 egui-wgpu = "0.32.0"
 egui = "0.32.0"
 typetag = "0.2.20"
-slang-reflector = { path = "../slang-reflector" }
+slang-reflector = { git = "https://github.com/Devon7925/slang-reflector.git" }
 url = "2.5.2"
 strum = { version = "0.26.3", features = ["derive"] }
 reqwest = { version = "0.12.15", features = ["blocking"] }

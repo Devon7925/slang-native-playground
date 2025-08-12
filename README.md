@@ -93,6 +93,15 @@ There are examples of use of the extra features in the `examples` folder. These 
 | `free_flight_camera` | A rasterizer of the Utah Teacup with keyboard control for the camera |
 | `painting` | A simple painting app demonstrating storage textures and indirect dispatch |
 
+You can also compile examples for web:
+
+```bash
+cargo build --target wasm32-unknown-unknown -p examples --example painting
+wasm-bindgen --out-dir target/generated/ --web target/wasm32-unknown-unknown/debug/examples/painting.wasm
+```
+
+You can then use the example from `examples/index.html`. You may need to update the js import in that file to point to the correct example.
+
 ## External Examples
 
 | Name | Description |

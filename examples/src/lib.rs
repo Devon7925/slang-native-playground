@@ -90,8 +90,7 @@ impl ApplicationHandler for App {
             self.state_receiver = Some(receiver);
             let compilation = self.compilation.take().unwrap();
             wasm_bindgen_futures::spawn_local(async move {
-                let mut state = Renderer::new(window.clone(), compilation).await;
-                // state.resize(state.window.inner_size());
+                let state = Renderer::new(window.clone(), compilation).await;
                 if sender.send(state).is_err() {
                     panic!("Failed to create and send renderer!");
                 }

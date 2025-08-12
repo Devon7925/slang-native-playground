@@ -100,6 +100,7 @@ async fn process_resource_commands(
     resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
     uniform_controllers: &Vec<UniformController>,
     uniform_size: u64,
+    window_size: [u32; 2],
 ) -> HashMap<String, GPUResource> {
     let mut allocated_resources: HashMap<String, GPUResource> = HashMap::new();
 
@@ -129,6 +130,7 @@ async fn process_resource_commands(
                 },
                 resource_metadata,
                 &resource_name,
+                window_size,
             ) {
                 safe_set(&mut allocated_resources, resource_name.clone(), resource);
                 false
@@ -485,6 +487,7 @@ impl Renderer {
             &resource_metadata,
             &compilation.uniform_controllers,
             compilation.uniform_size,
+            [size.width, size.height],
         )
         .await;
 
