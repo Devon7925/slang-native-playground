@@ -4,6 +4,7 @@ pub mod slang_compile;
 mod uniform_controllers;
 
 use serde::{Deserialize, Serialize};
+use winit::dpi::PhysicalSize;
 use std::collections::{HashMap, HashSet};
 use wgpu::BindGroupLayoutEntry;
 
@@ -47,7 +48,7 @@ pub trait ResourceCommandData {
     fn get_rebind_original_resource(&self) -> Option<&String> {
         None
     }
-    fn handle_resize(&self, _api: GraphicsAPI, _resource_name: &String, _new_size: [u32; 2]) {}
+    fn handle_resize(&self, _api: GraphicsAPI, _resource_name: &String, _new_size: PhysicalSize<u32>) {}
 
     #[cfg(feature = "compilation")]
     fn playground_name() -> String
@@ -86,7 +87,7 @@ pub trait ResourceCommandData {
         api: GraphicsAPI,
         resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        window_size: [u32; 2],
+        window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()>;
 }
 

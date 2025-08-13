@@ -10,6 +10,7 @@ use slang_reflector::{
 #[cfg(feature = "compilation")]
 use url::Url;
 use wgpu::{BufferDescriptor, TextureFormat};
+use winit::dpi::PhysicalSize;
 
 #[derive(Deserialize, Serialize)]
 pub struct ZerosResourceCommand {
@@ -62,7 +63,7 @@ impl ResourceCommandData for ZerosResourceCommand {
         api: GraphicsAPI,
         resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        _window_size: [u32; 2],
+        _window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
         let Some(binding_info) = api.resource_bindings.get(resource_name) else {
             panic!("Resource ${resource_name} is not defined in the bindings.");
@@ -141,7 +142,7 @@ impl ResourceCommandData for RandResourceCommand {
         api: GraphicsAPI,
         resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        _window_size: [u32; 2],
+        _window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
         let element_size = 4; // RAND is only valid for floats
 
@@ -250,7 +251,7 @@ impl ResourceCommandData for BlackResourceCommand {
         api: GraphicsAPI,
         _resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        _window_size: [u32; 2],
+        _window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
         let size = self.width * self.height;
         let element_size = self.format.block_copy_size(None).unwrap();
@@ -381,7 +382,7 @@ impl ResourceCommandData for Black3DResourceCommand {
         api: GraphicsAPI,
         _resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        _window_size: [u32; 2],
+        _window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
         let size = self.size_x * self.size_y * self.size_z;
         let element_size = self.format.block_copy_size(None).unwrap();
@@ -497,9 +498,9 @@ impl ResourceCommandData for BlackScreenResourceCommand {
         })
     }
 
-    fn handle_resize(&self, api: GraphicsAPI, resource_name: &String, new_size: [u32; 2]) {
-        let width = (self.width_scale * new_size[0] as f32) as u32;
-        let height = (self.height_scale * new_size[1] as f32) as u32;
+    fn handle_resize(&self, api: GraphicsAPI, resource_name: &String, new_size: PhysicalSize<u32>) {
+        let width = (self.width_scale * new_size.width as f32) as u32;
+        let height = (self.height_scale * new_size.height as f32) as u32;
         let size = width * height;
         let element_size = self.format.block_copy_size(None).unwrap();
         let Some(binding_info) = api.resource_bindings.get(resource_name) else {
@@ -579,10 +580,10 @@ impl ResourceCommandData for BlackScreenResourceCommand {
         api: GraphicsAPI,
         _resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        window_size: [u32; 2],
+        window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
-        let width = (self.width_scale * window_size[0] as f32) as u32;
-        let height = (self.height_scale * window_size[1] as f32) as u32;
+        let width = (self.width_scale * window_size.width as f32) as u32;
+        let height = (self.height_scale * window_size.height as f32) as u32;
         let size = width * height;
         let element_size = self.format.block_copy_size(None).unwrap();
         let Some(binding_info) = api.resource_bindings.get(resource_name) else {
@@ -744,7 +745,7 @@ impl ResourceCommandData for UrlResourceCommand {
         api: GraphicsAPI,
         _resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        _window_size: [u32; 2],
+        _window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
         // Load image from URL and wait for it to be ready.
         let Some(binding_info) = api.resource_bindings.get(resource_name) else {
@@ -950,7 +951,7 @@ impl ResourceCommandData for ModelResourceCommand {
         api: GraphicsAPI,
         _resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        _window_size: [u32; 2],
+        _window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
         let Some(binding_info) = api.resource_bindings.get(resource_name) else {
             panic!("Resource ${resource_name} is not defined in the bindings.");
@@ -1031,7 +1032,7 @@ impl ResourceCommandData for RebindForDrawResourceCommand {
         api: GraphicsAPI,
         _resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        _window_size: [u32; 2],
+        _window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
         let Some(binding_info) = api.resource_bindings.get(resource_name) else {
             panic!("Resource {} is not defined in the bindings.", resource_name);
@@ -1112,7 +1113,7 @@ impl ResourceCommandData for SamplerResourceCommand {
         api: GraphicsAPI,
         _resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
         resource_name: &String,
-        _window_size: [u32; 2],
+        _window_size: PhysicalSize<u32>,
     ) -> Result<GPUResource, ()> {
         let Some(binding_info) = api.resource_bindings.get(resource_name) else {
             panic!("Resource ${resource_name} is not defined in the bindings.");

@@ -1,20 +1,23 @@
-
 mod compute_pipeline;
 mod draw_pipeline;
 
 use draw_pipeline::DrawPipeline;
 use regex::Regex;
 use slang_playground_compiler::{
-    safe_set, CallCommand, CallCommandParameters, CompilationResult, DrawCommand, GPUResource, GraphicsAPI, ResourceCommandData, ResourceMetadata, UniformController, UniformSourceData
+    CallCommand, CallCommandParameters, CompilationResult, DrawCommand, GPUResource, GraphicsAPI,
+    ResourceCommandData, ResourceMetadata, UniformController, UniformSourceData, safe_set,
 };
-use wgpu::{Extent3d, Features};
+use wgpu::Extent3d;
 
-use std::{borrow::Cow, cell::RefCell, collections::HashMap, panic, rc::Rc, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow, cell::RefCell, collections::HashMap, panic, rc::Rc, sync::Arc, time::Duration,
+};
 
 use compute_pipeline::ComputePipeline;
 use std::collections::HashSet;
 use winit::{
-    dpi::PhysicalPosition, event::{ElementState, MouseButton, WindowEvent}, window::Window
+    dpi::{PhysicalPosition, PhysicalSize},
+    event::{ElementState, MouseButton, WindowEvent},
 };
 
 struct MouseState {
@@ -46,12 +49,8 @@ impl KeyboardState {
 }
 
 pub struct Renderer {
-    pub window: Arc<Window>,
     device: Arc<wgpu::Device>,
-    queue: wgpu::Queue,
-    size: winit::dpi::PhysicalSize<u32>,
-    surface: wgpu::Surface<'static>,
-    surface_format: wgpu::TextureFormat,
+    queue: Arc<wgpu::Queue>,
     compute_pipelines: HashMap<String, ComputePipeline>,
     draw_pipelines: Vec<DrawPipeline>,
     bindings: HashMap<String, wgpu::BindGroupLayoutEntry>,
@@ -64,6 +63,7 @@ pub struct Renderer {
     allocated_resources: HashMap<String, GPUResource>,
     mouse_state: MouseState,
     keyboard_state: KeyboardState,
+    render_size: PhysicalSize<u32>,
     print_receiver: Option<futures::channel::oneshot::Receiver<()>>,
     first_frame: bool,
     delta_time: f32,
@@ -78,7 +78,12 @@ fn get_resource_metadata(
 ) -> HashMap<String, Vec<ResourceMetadata>> {
     let mut result: HashMap<String, Vec<ResourceMetadata>> = HashMap::new();
 
-    for CallCommand { function: _, call_once: _, parameters } in call_commands.iter() {
+    for CallCommand {
+        function: _,
+        call_once: _,
+        parameters,
+    } in call_commands.iter()
+    {
         if let CallCommandParameters::Indirect(buffer_name, _) = parameters {
             result
                 .entry(buffer_name.clone())
@@ -100,7 +105,7 @@ async fn process_resource_commands(
     resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
     uniform_controllers: &Vec<UniformController>,
     uniform_size: u64,
-    window_size: [u32; 2],
+    window_size: PhysicalSize<u32>,
 ) -> HashMap<String, GPUResource> {
     let mut allocated_resources: HashMap<String, GPUResource> = HashMap::new();
 
@@ -146,7 +151,12 @@ async fn process_resource_commands(
         let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput") else {
             panic!("cannot get uniforms")
         };
-        for UniformController { controller, buffer_offset, .. } in uniform_controllers {
+        for UniformController {
+            controller,
+            buffer_offset,
+            ..
+        } in uniform_controllers
+        {
             // Initialize the uniform data.
             let buffer_default = controller.get_data(&uniform_source_data);
             queue.write_buffer(buffer, *buffer_offset as u64, &buffer_default);
@@ -320,8 +330,7 @@ fn format_specifier(
         }
         "%" => {
             // Literal "%"
-            return "%"
-                .to_string();
+            return "%".to_string();
         }
         st => panic!("Unsupported specifier: {}", st),
     }
@@ -444,38 +453,12 @@ fn parse_printf_buffer(
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>, compilation: CompilationResult) -> Self {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions::default())
-            .await
-            .unwrap();
-
-        let info = adapter.get_info();
-
-        let info_logging = format!("Running on backend: {}\n", info.backend);
-        #[cfg(not(target_arch = "wasm32"))]
-        print!("{}", info_logging);
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&info_logging.into());
-
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    required_features: Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-
-        let device = Arc::new(device);
-
-        let size = window.inner_size();
-
-        let surface = instance.create_surface(window.clone()).unwrap();
-        let surface_format = wgpu::TextureFormat::Rgba8Unorm;
-
+    pub async fn new(
+        compilation: CompilationResult,
+        render_size: PhysicalSize<u32>,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+    ) -> Self {
         let resource_metadata =
             get_resource_metadata(&compilation.resource_commands, &compilation.call_commands);
 
@@ -487,7 +470,7 @@ impl Renderer {
             &resource_metadata,
             &compilation.uniform_controllers,
             compilation.uniform_size,
-            [size.width, size.height],
+            render_size,
         )
         .await;
 
@@ -533,12 +516,8 @@ impl Renderer {
         }
 
         let renderer = Self {
-            window,
             device,
-            queue,
-            size,
-            surface,
-            surface_format,
+            queue: queue.clone(),
             compute_pipelines,
             draw_pipelines,
             bindings: compilation.bindings,
@@ -557,6 +536,7 @@ impl Renderer {
                 is_mouse_down: false,
             },
             keyboard_state: KeyboardState::new(),
+            render_size,
             print_receiver: None,
             first_frame: true,
             delta_time: 0.0,
@@ -565,80 +545,11 @@ impl Renderer {
             frame_count: 0,
         };
 
-        // Configure surface for the first time
-        renderer.configure_surface();
-
         renderer
     }
 
-    pub fn configure_surface(&self) {
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: self.surface_format,
-            // Request compatibility with the sRGB-format texture view we‘re going to create later.
-            view_formats: vec![self.surface_format],
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            width: self.size.width,
-            height: self.size.height,
-            desired_maximum_frame_latency: 2,
-            present_mode: if cfg!(target_arch = "wasm32") {
-                wgpu::PresentMode::Fifo
-            } else {
-                wgpu::PresentMode::Immediate
-            },
-        };
-        self.surface.configure(&self.device, &surface_config);
-    }
-
-    pub fn render(&mut self) {
-        if let Some(receiver) = self.print_receiver.as_mut() {
-            let mut print_received = false;
-            if let Ok(Some(_)) = receiver.try_recv() {
-                let Some(GPUResource::Buffer(printf_buffer_read)) =
-                    self.allocated_resources.get("printfBufferRead")
-                else {
-                    panic!("printfBufferRead is incorrect type or doesn't exist");
-                };
-
-                let format_print = parse_printf_buffer(
-                    &self.hashed_strings,
-                    &printf_buffer_read,
-                    PRINTF_BUFFER_ELEMENT_SIZE,
-                );
-
-                if !format_print.is_empty() {
-                    let result = format!("Shader Output:\n{}\n", format_print.join(""));
-                    #[cfg(not(target_arch = "wasm32"))]
-                    print!("{}", result);
-                    #[cfg(target_arch = "wasm32")]
-                    web_sys::console::log_1(&result.into())
-                }
-
-                printf_buffer_read.unmap();
-
-                print_received = true;
-            }
-            if print_received {
-                self.print_receiver = None;
-            } else {
-                return;
-            }
-        }
-
-        // Create texture view
-        let surface_texture = self
-            .surface
-            .get_current_texture()
-            .expect("failed to acquire next swapchain texture");
-        let texture_view = surface_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor {
-                // Without add_srgb_suffix() the image we will be working with
-                // might not be "gamma correct".
-                format: Some(self.surface_format),
-                ..Default::default()
-            });
-
+    /// Prepare uniforms and compute passes. Call at the start of a frame.
+    pub fn begin_frame(&mut self) {
         let Some(GPUResource::Buffer(uniform_input)) = self.allocated_resources.get("uniformInput")
         else {
             panic!("uniformInput doesn't exist or is of incorrect type");
@@ -683,9 +594,10 @@ impl Renderer {
         }
 
         self.queue.write_buffer(uniform_input, 0, &buffer_data);
+    }
 
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-
+    /// Run compute passes. Accepts a mutable CommandEncoder.
+    pub fn run_compute_passes(&mut self, encoder: &mut wgpu::CommandEncoder) {
         for call_command in self.call_commands.iter() {
             if !self.first_frame && call_command.call_once {
                 continue;
@@ -765,37 +677,24 @@ impl Renderer {
             };
             drop(pass);
         }
+        self.first_frame = false;
+    }
 
-        if self.compute_pipelines.contains_key("printMain") {
-            let Some(GPUResource::Buffer(printf_buffer_read)) =
-                self.allocated_resources.get("printfBufferRead")
-            else {
-                panic!("printfBufferRead is incorrect type or doesn't exist");
-            };
-            encoder.clear_buffer(printf_buffer_read, 0, None);
-            let Some(GPUResource::Buffer(g_printed_buffer)) =
-                self.allocated_resources.get("g_printedBuffer")
-            else {
-                panic!("g_printedBuffer is not a buffer");
-            };
-            encoder.copy_buffer_to_buffer(
-                g_printed_buffer,
-                0,
-                printf_buffer_read,
-                0,
-                g_printed_buffer.size(),
-            );
-        }
-
+    /// Run draw passes. Accepts a mutable CommandEncoder and a TextureView.
+    pub fn run_draw_passes(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        texture_view: &wgpu::TextureView,
+    ) {
         let mut pass = DrawPipeline::begin_render_pass(
             &self.device,
             Extent3d {
-                width: surface_texture.texture.width(),
-                height: surface_texture.texture.height(),
+                width: self.render_size.width,
+                height: self.render_size.height,
                 depth_or_array_layers: 1,
             },
-            &mut encoder,
-            &texture_view,
+            encoder,
+            texture_view,
         );
         for (draw_command, pipeline) in self
             .draw_commands
@@ -808,44 +707,51 @@ impl Renderer {
             pass.draw(0..draw_command.vertex_count, 0..1);
         }
         drop(pass);
+    }
 
-        // Submit the command in the queue to execute
-        self.queue.submit([encoder.finish()]);
+    /// Optionally handle print buffer output after frame submission
+    pub fn handle_print_output(&mut self) {
+        if let Some(receiver) = self.print_receiver.as_mut() {
+            let mut print_received = false;
+            if let Ok(Some(_)) = receiver.try_recv() {
+                let Some(GPUResource::Buffer(printf_buffer_read)) =
+                    self.allocated_resources.get("printfBufferRead")
+                else {
+                    panic!("printfBufferRead is incorrect type or doesn't exist");
+                };
 
-        if self.compute_pipelines.contains_key("printMain") {
-            let Some(GPUResource::Buffer(printf_buffer_read)) =
-                self.allocated_resources.get("printfBufferRead")
-            else {
-                panic!("printfBufferRead is incorrect type or doesn't exist");
-            };
-            let (sender, receiver) = futures::channel::oneshot::channel();
-            self.print_receiver = Some(receiver);
-            printf_buffer_read
-                .slice(..)
-                .map_async(wgpu::MapMode::Read, move |r| {
-                    r.unwrap();
-                    sender.send(()).unwrap()
-                });
-            self.device.poll(wgpu::PollType::Wait).unwrap();
+                let format_print = parse_printf_buffer(
+                    &self.hashed_strings,
+                    &printf_buffer_read,
+                    PRINTF_BUFFER_ELEMENT_SIZE,
+                );
+
+                if !format_print.is_empty() {
+                    let result = format!("Shader Output:\n{}\n", format_print.join(""));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    print!("{}", result);
+                    #[cfg(target_arch = "wasm32")]
+                    web_sys::console::log_1(&result.into())
+                }
+
+                printf_buffer_read.unmap();
+
+                print_received = true;
+            }
+            if print_received {
+                self.print_receiver = None;
+            }
         }
-        surface_texture.present();
-
-        self.first_frame = false;
     }
 
     pub fn process_event(
         &mut self,
-        event: &winit::event::WindowEvent
+        event: &winit::event::WindowEvent,
     ) {
         match event {
-            #[cfg(target_arch = "wasm32")]
-            WindowEvent::RedrawRequested => {
-                self.render();
-            }
             WindowEvent::Resized(size) => {
-                // reconfigure the surface
-                self.configure_surface();
-
+                self.render_size = *size;
+                // reconfigure the surface if provided
                 for (resource_name, command_data) in self.resource_commands.iter() {
                     command_data.handle_resize(
                         GraphicsAPI {
@@ -855,14 +761,15 @@ impl Renderer {
                             allocated_resources: &mut self.allocated_resources,
                         },
                         resource_name,
-                        [size.width, size.height],
+                        *size,
                     );
                 }
                 for (_, compute_pipeline) in self.compute_pipelines.iter_mut() {
                     compute_pipeline.create_bind_group(&self.allocated_resources);
                 }
                 for draw_pipeline in self.draw_pipelines.iter_mut() {
-                    draw_pipeline.create_bind_group(&self.allocated_resources, &self.resource_commands);
+                    draw_pipeline
+                        .create_bind_group(&self.allocated_resources, &self.resource_commands);
                 }
             }
             WindowEvent::CursorMoved {
@@ -881,7 +788,8 @@ impl Renderer {
             } => {
                 if *button == MouseButton::Left {
                     if *mouse_state == ElementState::Pressed {
-                        self.mouse_state.last_mouse_clicked_pos = self.mouse_state.current_mouse_pos;
+                        self.mouse_state.last_mouse_clicked_pos =
+                            self.mouse_state.current_mouse_pos;
                         self.mouse_state.mouse_clicked = true;
                         self.mouse_state.is_mouse_down = true;
                     } else {
