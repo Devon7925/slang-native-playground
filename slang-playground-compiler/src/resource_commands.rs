@@ -12,7 +12,7 @@ use url::Url;
 use wgpu::{BufferDescriptor, TextureFormat};
 use winit::dpi::PhysicalSize;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ZerosResourceCommand {
     count: u32,
     element_size: u32,
@@ -98,7 +98,7 @@ impl ResourceCommandData for ZerosResourceCommand {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct RandResourceCommand {
     count: u32,
 }
@@ -184,7 +184,7 @@ impl ResourceCommandData for RandResourceCommand {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct BlackResourceCommand {
     pub width: u32,
     pub height: u32,
@@ -307,7 +307,7 @@ impl ResourceCommandData for BlackResourceCommand {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Black3DResourceCommand {
     pub size_x: u32,
     pub size_y: u32,
@@ -436,7 +436,7 @@ impl ResourceCommandData for Black3DResourceCommand {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct BlackScreenResourceCommand {
     pub width_scale: f32,
     pub height_scale: f32,
@@ -640,7 +640,7 @@ impl ResourceCommandData for BlackScreenResourceCommand {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UrlResourceCommand {
     pub data: Vec<u8>,
     pub width: u32,
@@ -798,7 +798,7 @@ pub enum ModelField {
     TexCoords,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ModelResourceCommand {
     pub data: Vec<u8>,
 }
@@ -977,7 +977,7 @@ impl ResourceCommandData for ModelResourceCommand {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct RebindForDrawResourceCommand {
     pub original_resource: String,
 }
@@ -1083,7 +1083,7 @@ impl ResourceCommandData for RebindForDrawResourceCommand {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct SamplerResourceCommand;
 
 #[typetag::serde]

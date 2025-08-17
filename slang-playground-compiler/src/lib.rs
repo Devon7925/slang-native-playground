@@ -3,10 +3,11 @@ mod resource_commands;
 pub mod slang_compile;
 mod uniform_controllers;
 
+use dyn_clone::DynClone;
 use serde::{Deserialize, Serialize};
-use winit::dpi::PhysicalSize;
 use std::collections::{HashMap, HashSet};
 use wgpu::BindGroupLayoutEntry;
+use winit::dpi::PhysicalSize;
 
 #[cfg(feature = "compilation")]
 use slang_reflector::{BoundResource, UserAttributeParameter, VariableReflectionType};
@@ -41,14 +42,20 @@ pub struct GraphicsAPI<'a> {
 }
 
 #[typetag::serde(tag = "type")]
-pub trait ResourceCommandData {
+pub trait ResourceCommandData: Send + Sync + std::fmt::Debug + DynClone {
     fn is_available_in_compute(&self) -> bool {
         true
     }
     fn get_rebind_original_resource(&self) -> Option<&String> {
         None
     }
-    fn handle_resize(&self, _api: GraphicsAPI, _resource_name: &String, _new_size: PhysicalSize<u32>) {}
+    fn handle_resize(
+        &self,
+        _api: GraphicsAPI,
+        _resource_name: &String,
+        _new_size: PhysicalSize<u32>,
+    ) {
+    }
 
     #[cfg(feature = "compilation")]
     fn playground_name() -> String
@@ -91,6 +98,8 @@ pub trait ResourceCommandData {
     ) -> Result<GPUResource, ()>;
 }
 
+dyn_clone::clone_trait_object!(ResourceCommandData);
+
 pub struct UniformSourceData<'a> {
     pub launch_time: web_time::Instant,
     pub delta_time: f32,
@@ -117,7 +126,7 @@ impl<'a> UniformSourceData<'a> {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct UniformController {
     pub name: String,
     pub buffer_offset: usize,
@@ -125,7 +134,7 @@ pub struct UniformController {
 }
 
 #[typetag::serde(tag = "type")]
-pub trait UniformControllerType {
+pub trait UniformControllerType: Send + Sync + std::fmt::Debug + DynClone {
     fn get_data(&self, uniform_source_data: &UniformSourceData) -> Vec<u8>;
     #[cfg(not(target_arch = "wasm32"))]
     fn render(&mut self, _name: &str, _ui: &mut egui::Ui) {}
@@ -163,6 +172,9 @@ pub trait UniformControllerType {
     }
 }
 
+dyn_clone::clone_trait_object!(UniformControllerType);
+
+#[derive(Clone, Debug)]
 pub struct CompilationResult {
     pub out_code: String,
     pub entry_group_sizes: HashMap<String, [u64; 3]>,
@@ -175,21 +187,21 @@ pub struct CompilationResult {
     pub uniform_controllers: Vec<UniformController>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum CallCommandParameters {
     ResourceBased(String, Option<u32>),
     FixedSize(Vec<u32>),
     Indirect(String, u32),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CallCommand {
     pub function: String,
     pub call_once: bool,
     pub parameters: CallCommandParameters,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DrawCommand {
     pub vertex_count: u32,
     pub vertex_entrypoint: String,

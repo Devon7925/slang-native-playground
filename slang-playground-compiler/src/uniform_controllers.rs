@@ -4,7 +4,7 @@ use slang_reflector::{ScalarType, UserAttributeParameter, VariableReflectionType
 
 use crate::{UniformControllerType, UniformSourceData};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UniformSlider {
     pub value: f32,
     pub min: f32,
@@ -63,7 +63,7 @@ impl UniformControllerType for UniformSlider {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UniformColorPick {
     pub value: [f32; 3],
 }
@@ -121,7 +121,7 @@ impl UniformControllerType for UniformColorPick {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UniformMousePosition;
 
 #[typetag::serde]
@@ -165,7 +165,7 @@ impl UniformControllerType for UniformMousePosition {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UniformTime;
 
 #[typetag::serde]
@@ -201,7 +201,7 @@ impl UniformControllerType for UniformTime {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UniformFrameId;
 
 #[typetag::serde]
@@ -235,7 +235,7 @@ impl UniformControllerType for UniformFrameId {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UniformDeltaTime;
 
 #[typetag::serde]
@@ -268,7 +268,7 @@ impl UniformControllerType for UniformDeltaTime {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UniformKeyInput {
     pub key: String,
 }
