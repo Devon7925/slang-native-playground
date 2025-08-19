@@ -154,7 +154,7 @@ fn variable_reflection_to_type_data(binding: &VariableReflectionType) -> TypeDat
                 );
             let struct_ident = format_ident!("{}", struct_name);
             let field_defs = fields.iter().map(|(field_ident, field_type)| {
-                quote! { #field_ident: #field_type }
+                quote! { pub #field_ident: #field_type }
             });
             let struct_def = quote! {
                 #[repr(C)]
