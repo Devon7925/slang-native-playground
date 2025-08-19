@@ -744,6 +744,22 @@ impl Renderer {
         }
     }
 
+    pub fn update_resource(&mut self, resource_name: &str, new_data: &[u8]) {
+        let Some(command_data) = self.resource_commands.get(resource_name) else {
+            return;
+        };
+        command_data.handle_update(
+            GraphicsAPI {
+                queue: &self.queue,
+                device: &self.device,
+                resource_bindings: &self.bindings,
+                allocated_resources: &mut self.allocated_resources,
+            },
+            &resource_name.to_string(),
+            new_data,
+        );
+    }
+
     pub fn process_event(
         &mut self,
         event: &winit::event::WindowEvent,

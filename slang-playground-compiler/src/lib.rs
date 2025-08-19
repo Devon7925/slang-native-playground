@@ -10,6 +10,8 @@ use wgpu::BindGroupLayoutEntry;
 use winit::dpi::PhysicalSize;
 
 #[cfg(feature = "compilation")]
+pub use slang_reflector;
+#[cfg(feature = "compilation")]
 use slang_reflector::{BoundResource, UserAttributeParameter, VariableReflectionType};
 
 #[derive(PartialEq)]
@@ -46,14 +48,29 @@ pub trait ResourceCommandData: Send + Sync + std::fmt::Debug + DynClone {
     fn is_available_in_compute(&self) -> bool {
         true
     }
+
+    #[cfg(feature = "compilation")]
+    fn generate_binding(&self) -> Option<VariableReflectionType> {
+        None
+    }
+
     fn get_rebind_original_resource(&self) -> Option<&String> {
         None
     }
+
     fn handle_resize(
         &self,
         _api: GraphicsAPI,
         _resource_name: &String,
         _new_size: PhysicalSize<u32>,
+    ) {
+    }
+
+    fn handle_update(
+        &self,
+        _api: GraphicsAPI,
+        _resource_name: &String,
+        _data: &[u8],
     ) {
     }
 

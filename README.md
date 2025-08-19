@@ -71,6 +71,10 @@ struct Vertex
 }
 ```
 
+### `playground::EXTERNAL`
+
+Allows controlling a GPU buffer from Rust.
+
 ### Github Imports
 
 Allows importing slang files directly from github using `github://user_name/repo_name/path/file.slang`.

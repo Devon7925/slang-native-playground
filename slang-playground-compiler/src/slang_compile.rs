@@ -63,6 +63,8 @@ impl Default for SlangCompiler {
         UniformKeyInput::register(&mut default_controllers);
 
         let mut default_resource_commands = HashMap::new();
+        
+        ExternalResourceCommand::register(&mut default_resource_commands);
         ZerosResourceCommand::register(&mut default_resource_commands);
         RandResourceCommand::register(&mut default_resource_commands);
         BlackResourceCommand::register(&mut default_resource_commands);

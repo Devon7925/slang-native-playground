@@ -86,6 +86,13 @@ public void printf<each T>(String format, expand each T values) where T : IPrint
     print(format, expand each values);
 }
 
+// Control a buffer with external data
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_EXTERNALAttribute
+{
+    int count;
+};
+
 // Initialize a \`float\` buffer with zeros of the provided size.
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_ZEROSAttribute

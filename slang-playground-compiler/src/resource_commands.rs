@@ -13,6 +13,120 @@ use wgpu::{BufferDescriptor, TextureFormat};
 use winit::dpi::PhysicalSize;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct ExternalResourceCommand {
+    count: u32,
+    element_size: u32,
+    #[serde(skip)]
+    #[cfg(feature = "compilation")]
+    binding: Option<VariableReflectionType>,
+}
+
+#[typetag::serde]
+impl ResourceCommandData for ExternalResourceCommand {
+    #[cfg(feature = "compilation")]
+    fn playground_name() -> String {
+        "EXTERNAL".to_string()
+    }
+
+    #[cfg(feature = "compilation")]
+    fn generate_binding(&self) -> Option<VariableReflectionType> {
+        self.binding.clone()
+    }
+
+    #[cfg(feature = "compilation")]
+    fn construct(
+        resource: &BoundResource,
+        parameters: &[UserAttributeParameter],
+        variable_name: &str,
+    ) -> Box<dyn ResourceCommandData> {
+        let BoundResource::StructuredBuffer {
+            resource_result: element_type,
+            ..
+        } = resource
+        else {
+            panic!(
+                "{} attribute cannot be applied to {variable_name}, it only supports buffers",
+                Self::playground_name(),
+            )
+        };
+        let [UserAttributeParameter::Int(count)] = parameters else {
+            panic!(
+                "Invalid attribute parameter type for {} attribute on {variable_name}",
+                Self::playground_name(),
+            )
+        };
+        assert!(
+            *count >= 0,
+            "{} count for {variable_name} cannot have negative size",
+            Self::playground_name(),
+        );
+
+        Box::new(ExternalResourceCommand {
+            count: *count as u32,
+            element_size: element_type.get_size() as u32,
+            binding: Some(element_type.clone())
+        })
+    }
+
+    fn assign_resources(
+        &self,
+        api: GraphicsAPI,
+        resource_metadata: &HashMap<String, Vec<ResourceMetadata>>,
+        resource_name: &String,
+        _window_size: PhysicalSize<u32>,
+    ) -> Result<GPUResource, ()> {
+        let Some(binding_info) = api.resource_bindings.get(resource_name) else {
+            panic!("Resource ${resource_name} is not defined in the bindings.");
+        };
+
+        if !matches!(binding_info.ty, wgpu::BindingType::Buffer { .. }) {
+            panic!("Resource ${resource_name} is an invalid type for ZEROS");
+        }
+
+        let mut usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
+
+        if resource_metadata
+            .get(resource_name)
+            .unwrap_or(&vec![])
+            .contains(&ResourceMetadata::Indirect)
+        {
+            usage |= wgpu::BufferUsages::INDIRECT;
+        }
+
+        let buffer = api.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&resource_name),
+            mapped_at_creation: false,
+            size: (self.count * self.element_size) as u64,
+            usage,
+        });
+
+        // Initialize the buffer with zeros.
+        let zeros = vec![0u8; (self.count * self.element_size) as usize];
+        api.queue.write_buffer(&buffer, 0, &zeros);
+
+        Ok(GPUResource::Buffer(buffer))
+    }
+
+    fn handle_update(
+        &self,
+        api: GraphicsAPI,
+        resource_name: &String,
+        data: &[u8],
+    ) {
+        let Some(GPUResource::Buffer(buffer)) = api.allocated_resources.get(resource_name) else {
+            panic!("Resource {} is not a Buffer", resource_name);
+        };
+        if data.len() != (self.count * self.element_size) as usize {
+            panic!(
+                "Data length does not match the expected size for resource {}",
+                resource_name
+            );
+        }
+        api.queue.write_buffer(buffer, 0, data);
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ZerosResourceCommand {
     count: u32,
     element_size: u32,
@@ -826,7 +940,7 @@ impl ResourceCommandData for ModelResourceCommand {
                 Self::playground_name(),
             )
         };
-        let VariableReflectionType::Struct(fields) = element_type else {
+        let VariableReflectionType::Struct(_, fields) = element_type else {
             panic!(
                 "{} attribute cannot be applied to {variable_name}, inner type must be struct",
                 Self::playground_name(),
