@@ -281,11 +281,12 @@ pub fn shader_module(input: TokenStream) -> TokenStream {
         quote! {}
         #[cfg(feature = "renderer-integration")]
         {
+            use heck::ToSnakeCase;
             let functions = bound_data.iter().map(|(name, data)| {
-                let fn_name = format_ident!("set_{}", name);
+                let fn_name = format_ident!("set_{}", name.to_snake_case());
                 let usage = data.usage.clone();
                 quote! {
-                    fn #fn_name(renderer: &mut Renderer, value: #usage) {
+                    pub fn #fn_name(renderer: &mut Renderer, value: #usage) {
                         renderer.update_resource(#name, bytemuck::bytes_of(&value));
                     }
                 }

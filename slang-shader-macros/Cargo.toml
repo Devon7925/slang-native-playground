@@ -15,10 +15,11 @@ serde = { workspace = true }
 wgpu = { workspace = true }
 base64 = { workspace = true }
 serde_json = { workspace = true }
+heck = { workspace = true, optional = true }
 slang-playground-compiler = { workspace = true, features = ["compilation"] }
 slang-renderer = { workspace = true, optional = true }
 
 
 [features]
 default = []
-renderer-integration = ["dep:slang-renderer"]
+renderer-integration = ["dep:slang-renderer", "dep:heck"]

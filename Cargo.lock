@@ -3232,6 +3232,7 @@ name = "slang-shader-macros"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "heck",
  "proc-macro2",
  "quote",
  "ron",
