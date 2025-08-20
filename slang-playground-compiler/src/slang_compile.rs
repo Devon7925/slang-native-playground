@@ -1,13 +1,10 @@
-use std::{
-    collections::HashMap,
-    ops::Deref,
-};
+use std::collections::HashMap;
 use strum::{EnumIter, IntoEnumIterator};
 
 use slang_reflector::{
     BoundParameter, BoundResource, EntrypointReflection, GlobalSession, ProgramLayoutReflector,
     ProgramReflection, ResourceAccess, ScalarType, TextureType, UserAttributeParameter,
-    VariableReflection, VariableReflectionType,
+    VariableReflection, VariableReflectionType, Downcast,
 };
 
 use crate::{
@@ -79,88 +76,6 @@ impl Default for SlangCompiler {
     }
 }
 
-#[derive(Clone)]
-struct CustomFileSystem;
-
-impl slang_reflector::FileSystem for CustomFileSystem {
-    fn load_file(&self, path: &str) -> slang_reflector::Result<slang_reflector::Blob> {
-        let mut path = path.to_string();
-
-        // Remove automatically added path prefix for github imports
-        let re = &regex::Regex::new(r"^.*/github://").unwrap();
-        path = re.replace_all(path.as_str(), "github://").to_string();
-
-        if let Some(git_path) = path.strip_prefix("github://") {
-            // first 2 parts of path are the user and repo
-            // Use git api to get files ex. "https://api.github.com/repos/shader-slang/slang-playground/contents/example.slang"
-            let parts: Vec<&str> = git_path.split('/').collect();
-            if parts.len() < 3 {
-                return Err(slang_reflector::Error::Blob(slang_reflector::Blob::from(
-                    "Invalid github path",
-                )));
-            }
-            let user = parts[0];
-            let repo = parts[1];
-            let file_path = parts[2..].join("/");
-            let url = format!(
-                "https://api.github.com/repos/{}/{}/contents/{}",
-                user, repo, file_path
-            );
-
-            // Set the User-Agent header to avoid 403 Forbidden error
-            let client = reqwest::blocking::Client::builder()
-                .user_agent("slang-playground")
-                .build()
-                .map_err(|e| {
-                    slang_reflector::Error::Blob(slang_reflector::Blob::from(e.to_string()))
-                })?;
-
-            let mut request = client.get(&url);
-
-            // try to get token from GITHUB_TOKEN file in repo root if possible
-            let token = std::fs::read_to_string("GITHUB_TOKEN");
-
-            if let Ok(token) = token {
-                request = request.header("Authorization", format!("token {}", token));
-            };
-
-            let response = request
-                .header("Accept", "application/vnd.github.v3.raw")
-                .send()
-                .map_err(|e| {
-                    slang_reflector::Error::Blob(slang_reflector::Blob::from(e.to_string()))
-                })?;
-
-            if !response.status().is_success() {
-                if response.status() == 403 {
-                    println!(
-                        "cargo::warning=Loading file {} failed. Possibly rate limited.",
-                        path.clone()
-                    );
-                }
-
-                return Err(slang_reflector::Error::Blob(slang_reflector::Blob::from(
-                    format!("Failed to get file from github: {}", response.status()),
-                )));
-            }
-
-            let response = response.text().map_err(|e| {
-                slang_reflector::Error::Blob(slang_reflector::Blob::from(e.to_string()))
-            })?;
-            return Ok(slang_reflector::Blob::from(response.into_bytes()));
-        } else {
-            match std::fs::read(&path) {
-                Ok(bytes) => {
-                    Ok(slang_reflector::Blob::from(bytes))
-                }
-                Err(e) => Err(slang_reflector::Error::Blob(slang_reflector::Blob::from(
-                    format!("Failed to read file: {}", e),
-                ))),
-            }
-        }
-    }
-}
-
 impl SlangCompiler {
     pub fn new(
         uniform_controller_constructors: HashMap<
@@ -212,10 +127,10 @@ impl SlangCompiler {
                     )
                 });
 
-            component_list.push(module.deref().clone());
+            component_list.push(module.downcast().clone());
 
             for entry_point in module.entry_points() {
-                component_list.push(entry_point.deref().clone());
+                component_list.push(entry_point.downcast().clone());
             }
         }
 
@@ -236,10 +151,10 @@ impl SlangCompiler {
                         panic!("Failed to load module {}: {:?}", st, e.to_string())
                     });
 
-                component_list.push(module.deref().clone());
+                component_list.push(module.downcast().clone());
 
                 for entry_point in module.entry_points() {
-                    component_list.push(entry_point.deref().clone());
+                    component_list.push(entry_point.downcast().clone());
                 }
             }
         }
@@ -457,17 +372,14 @@ impl SlangCompiler {
             .format(slang_reflector::CompileTarget::Wgsl)
             .profile(self.global_slang_session.find_profile("spirv_1_6"));
 
-        let custom_file_system = CustomFileSystem;
-
         let targets = [target_desc];
 
         let session_desc = slang_reflector::SessionDesc::default()
             .targets(&targets)
             .search_paths(&search_paths)
-            .options(&session_options)
-            .file_system(custom_file_system.clone());
+            .options(&session_options);
 
-        let Ok(slang_session) = self.global_slang_session.create_session(&session_desc) else {
+        let Some(slang_session) = self.global_slang_session.create_session(&session_desc) else {
             panic!("Failed to create slang session");
         };
 
@@ -490,6 +402,7 @@ impl SlangCompiler {
                 .unwrap()
                 .function_reflection()
                 .name()
+                .unwrap()
                 .to_string();
             if SlangCompiler::is_runnable_entry_point(&name) {
                 panic!("User defined playground entrypoint {}", name)
@@ -515,7 +428,7 @@ impl SlangCompiler {
         for entry in shader_reflection.entry_points() {
             let group_size = entry.compute_thread_group_size();
             if entry.stage() == slang_reflector::Stage::Compute {
-                entry_group_sizes.insert(entry.name().to_string(), group_size);
+                entry_group_sizes.insert(entry.name().unwrap().to_string(), group_size);
             }
         }
 

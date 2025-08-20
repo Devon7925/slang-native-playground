@@ -261,9 +261,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bindgen"
-version = "0.71.1"
+version = "0.72.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
+checksum = "4f72209734318d0b619a5e0f5129918b848c416e122a3c4ce054e03cb87b726f"
 dependencies = [
  "bitflags 2.9.2",
  "cexpr",
@@ -1569,9 +1569,9 @@ dependencies = [
 
 [[package]]
 name = "inventory"
-version = "0.3.20"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab08d7cd2c5897f2c949e5383ea7c7db03fb19130ffcfbf7eda795137ae3cb83"
+checksum = "bc61209c082fbeb19919bee74b176221b27223e27b65d781eb91af24eb1fb46e"
 dependencies = [
  "rustversion",
 ]
@@ -1923,7 +1923,7 @@ dependencies = [
  "rustc-hash 1.1.0",
  "spirv",
  "strum",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "unicode-ident",
 ]
 
@@ -3125,6 +3125,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "shader-slang"
+version = "0.1.0"
+source = "git+https://github.com/Devon7925/slang-rs#75ac34925fe69ad685d796f47237f77730a831cb"
+dependencies = [
+ "shader-slang-sys",
+]
+
+[[package]]
+name = "shader-slang-sys"
+version = "0.1.0"
+source = "git+https://github.com/Devon7925/slang-rs#75ac34925fe69ad685d796f47237f77730a831cb"
+dependencies = [
+ "bindgen",
+ "serde",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3150,17 +3167,6 @@ name = "slab"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
-
-[[package]]
-name = "slang"
-version = "0.1.0"
-source = "git+https://github.com/Devon7925/slang-rs#684515bd09e525a98d5cb841924cd5ff994b40db"
-dependencies = [
- "libc",
- "paste",
- "slang-sys",
- "thiserror 2.0.15",
-]
 
 [[package]]
 name = "slang-debug-app"
@@ -3202,10 +3208,10 @@ dependencies = [
 [[package]]
 name = "slang-reflector"
 version = "0.1.0"
-source = "git+https://github.com/Devon7925/slang-reflector.git#0a5225eedd324558a12ea43a81adc2fbf59f8afe"
+source = "git+https://github.com/Devon7925/slang-reflector.git#6124cf7a8fb6e90a32cd21db3af3ac4eea8b44df"
 dependencies = [
  "serde",
- "slang",
+ "shader-slang",
 ]
 
 [[package]]
@@ -3242,16 +3248,6 @@ dependencies = [
  "slang-renderer",
  "syn",
  "wgpu",
-]
-
-[[package]]
-name = "slang-sys"
-version = "0.1.0"
-source = "git+https://github.com/Devon7925/slang-rs#684515bd09e525a98d5cb841924cd5ff994b40db"
-dependencies = [
- "bindgen",
- "paste",
- "serde",
 ]
 
 [[package]]
@@ -3450,15 +3446,15 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "tempfile"
-version = "3.20.0"
+version = "3.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8a64e3985349f2441a1a9ef0b853f869006c3855f2cda6862a94d26ebb9d6a1"
+checksum = "15b61f8f20e3a6f7e0649d825294eaf317edce30f82cf6026e7e4cb9222a7d1e"
 dependencies = [
  "fastrand",
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.8",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3481,11 +3477,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.15"
+version = "2.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80d76d3f064b981389ecb4b6b7f45a0bf9fdac1d5b9204c7bd6714fecc302850"
+checksum = "3467d614147380f2e4e374161426ff399c91084acd2363eaf549172b3d5e60c0"
 dependencies = [
- "thiserror-impl 2.0.15",
+ "thiserror-impl 2.0.16",
 ]
 
 [[package]]
@@ -3501,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.15"
+version = "2.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44d29feb33e986b6ea906bd9c3559a856983f92371b3eaa5e83782a351623de0"
+checksum = "6c5e1be1c48b9172ee610da68fd9cd2770e7a4056cb3fc98710ee6906f0c7960"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4148,7 +4144,7 @@ dependencies = [
  "rustc-hash 1.1.0",
  "serde",
  "smallvec",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "wgpu-core-deps-apple",
  "wgpu-core-deps-emscripten",
  "wgpu-core-deps-windows-linux-android",
@@ -4222,7 +4218,7 @@ dependencies = [
  "raw-window-handle",
  "renderdoc-sys",
  "smallvec",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "wasm-bindgen",
  "web-sys",
  "wgpu-types",
@@ -4241,17 +4237,17 @@ dependencies = [
  "js-sys",
  "log",
  "serde",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "web-sys",
 ]
 
 [[package]]
 name = "winapi-util"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
+checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
