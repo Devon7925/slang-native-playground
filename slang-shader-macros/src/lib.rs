@@ -301,7 +301,7 @@ pub fn shader_module(input: TokenStream) -> TokenStream {
                 let usage = data.usage.clone();
                 quote! {
                     pub fn #fn_name(renderer: &mut Renderer, value: #usage) {
-                        renderer.update_resource(#name, bytemuck::bytes_of(&value));
+                        renderer.update_uniform(#name, bytemuck::bytes_of(&value));
                     }
                 }
             });
