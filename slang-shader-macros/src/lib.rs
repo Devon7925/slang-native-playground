@@ -3,8 +3,7 @@ use std::path::Path;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use slang_playground_compiler::{
-    CompilationResult, slang_compile::SlangCompiler, slang_reflector::ScalarType,
-    slang_reflector::VariableReflectionType,
+    slang_compile::SlangCompiler, slang_reflector::{ScalarType, VariableReflectionType}, CompilationResult, UniformController
 };
 use syn::{
     LitStr, Token,
@@ -268,10 +267,16 @@ pub fn shader_module(input: TokenStream) -> TokenStream {
     search_paths.push(shaders_path.to_str().unwrap());
 
     let compilation_result = compiler.compile(search_paths, &shader_path);
-    let bound_data = compilation_result
+    let resource_bound_data = compilation_result
         .resource_commands
         .iter()
         .filter_map(|(bind_name, cmd)| cmd.generate_binding().map(|binding| (bind_name.clone(), binding)))
+        .map(|(name, binding)| (name, variable_reflection_to_type_data(&binding)))
+        .collect::<Vec<_>>();
+    let uniform_bound_data = compilation_result
+        .uniform_controllers
+        .iter()
+        .filter_map(|UniformController { name, controller, .. }| controller.generate_binding().map(|binding| (name.clone(), binding)))
         .map(|(name, binding)| (name, variable_reflection_to_type_data(&binding)))
         .collect::<Vec<_>>();
     
@@ -282,7 +287,16 @@ pub fn shader_module(input: TokenStream) -> TokenStream {
         #[cfg(feature = "renderer-integration")]
         {
             use heck::ToSnakeCase;
-            let functions = bound_data.iter().map(|(name, data)| {
+            let resource_functions = resource_bound_data.iter().map(|(name, data)| {
+                let fn_name = format_ident!("set_{}", name.to_snake_case());
+                let usage = data.usage.clone();
+                quote! {
+                    pub fn #fn_name(renderer: &mut Renderer, value: #usage) {
+                        renderer.update_resource(#name, bytemuck::bytes_of(&value));
+                    }
+                }
+            });
+            let uniform_functions = uniform_bound_data.iter().map(|(name, data)| {
                 let fn_name = format_ident!("set_{}", name.to_snake_case());
                 let usage = data.usage.clone();
                 quote! {
@@ -293,12 +307,14 @@ pub fn shader_module(input: TokenStream) -> TokenStream {
             });
             quote! {
                 use slang_renderer::Renderer;
-                #(#functions)*
+                #(#resource_functions)*
+                #(#uniform_functions)*
             }
         }
     };
 
-    let definitions = bound_data.into_iter().flat_map(|(_, data)| data.definitions);
+    let resource_definitions = resource_bound_data.into_iter().flat_map(|(_, data)| data.definitions);
+    let uniform_definitions = uniform_bound_data.into_iter().flat_map(|(_, data)| data.definitions);
 
     let result_tokens = compilation_result_tokens(compilation_result);
 
@@ -306,7 +322,8 @@ pub fn shader_module(input: TokenStream) -> TokenStream {
         use once_cell::sync::Lazy;
         use slang_playground_compiler::CompilationResult;
         #renderer_integration
-        #(#definitions)*
+        #(#resource_definitions)*
+        #(#uniform_definitions)*
         pub static COMPILATION_RESULT: Lazy<CompilationResult> = Lazy::new(|| #result_tokens);
     };
 

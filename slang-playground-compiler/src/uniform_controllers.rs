@@ -108,7 +108,8 @@ impl UniformControllerType for UniformColorPick {
             UserAttributeParameter::Float(red),
             UserAttributeParameter::Float(green),
             UserAttributeParameter::Float(blue),
-        ] = parameters else {
+        ] = parameters
+        else {
             panic!(
                 "Invalid attribute parameter type for {} attribute on {variable_name}",
                 Self::playground_name()
@@ -311,8 +312,62 @@ impl UniformControllerType for UniformKeyInput {
             )
         };
 
-        Box::new(UniformKeyInput {
-            key: key.clone()
-        })
+        Box::new(UniformKeyInput { key: key.clone() })
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct UniformExternal {
+    // store latest data for this uniform
+    #[serde(skip)]
+    pub data: Vec<u8>,
+    #[cfg(feature = "compilation")]
+    #[serde(skip)]
+    pub binding: Option<VariableReflectionType>,
+}
+
+impl Default for UniformExternal {
+    fn default() -> Self {
+        UniformExternal {
+            data: vec![],
+            #[cfg(feature = "compilation")]
+            binding: None,
+        }
+    }
+}
+
+#[typetag::serde]
+impl UniformControllerType for UniformExternal {
+    fn get_data(&self, _uniform_source_data: &UniformSourceData) -> Vec<u8> {
+        self.data.clone()
+    }
+
+    fn handle_update(&mut self, data: &[u8]) {
+        self.data.clear();
+        self.data.extend_from_slice(data);
+    }
+
+    #[cfg(feature = "compilation")]
+    fn generate_binding(&self) -> Option<VariableReflectionType> {
+        self.binding.clone()
+    }
+
+    #[cfg(feature = "compilation")]
+    fn playground_name() -> String {
+        "EXTERNAL".to_string()
+    }
+
+    #[cfg(feature = "compilation")]
+    fn construct(
+        uniform_type: &VariableReflectionType,
+        _parameters: &[UserAttributeParameter],
+        _variable_name: &str,
+    ) -> Box<dyn UniformControllerType> {
+        // EXTERNAL applies to uniforms of any type; we just record the type for size checks
+        let ctrl = UniformExternal {
+            binding: Some(uniform_type.clone()),
+            ..UniformExternal::default()
+        };
+        Box::new(ctrl)
     }
 }

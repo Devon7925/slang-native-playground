@@ -66,19 +66,12 @@ pub trait ResourceCommandData: Send + Sync + std::fmt::Debug + DynClone {
     ) {
     }
 
-    fn handle_update(
-        &self,
-        _api: GraphicsAPI,
-        _resource_name: &String,
-        _data: &[u8],
-    ) {
-    }
+    fn handle_update(&self, _api: GraphicsAPI, _resource_name: &String, _data: &[u8]) {}
 
     #[cfg(feature = "compilation")]
     fn playground_name() -> String
     where
         Self: Sized;
-
     #[cfg(feature = "compilation")]
     fn construct(
         resource: &BoundResource,
@@ -155,6 +148,14 @@ pub trait UniformControllerType: Send + Sync + std::fmt::Debug + DynClone {
     fn get_data(&self, uniform_source_data: &UniformSourceData) -> Vec<u8>;
     #[cfg(not(target_arch = "wasm32"))]
     fn render(&mut self, _name: &str, _ui: &mut egui::Ui) {}
+
+    /// Allow external updates to a uniform controller from the host. Default no-op.
+    fn handle_update(&mut self, _data: &[u8]) {}
+
+    #[cfg(feature = "compilation")]
+    fn generate_binding(&self) -> Option<VariableReflectionType> {
+        None
+    }
 
     #[cfg(feature = "compilation")]
     fn playground_name() -> String

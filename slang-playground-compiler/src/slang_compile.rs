@@ -58,6 +58,7 @@ impl Default for SlangCompiler {
         UniformMousePosition::register(&mut default_controllers);
         UniformDeltaTime::register(&mut default_controllers);
         UniformKeyInput::register(&mut default_controllers);
+        UniformExternal::register(&mut default_controllers);
 
         let mut default_resource_commands = HashMap::new();
         

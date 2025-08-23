@@ -759,11 +759,21 @@ impl Renderer {
             new_data,
         );
     }
+    
+    pub fn update_uniform(&mut self, uniform_name: &str, new_data: &[u8]) {
+        let mut uniform_components = self.uniform_components.borrow_mut();
+        let Some(UniformController { controller, .. }) = uniform_components
+            .iter_mut()
+            .find(|c| c.name == uniform_name)
+        else {
+            return;
+        };
 
-    pub fn process_event(
-        &mut self,
-        event: &winit::event::WindowEvent,
-    ) {
+        // let the controller update its internal state
+        controller.handle_update(new_data);
+    }
+
+    pub fn process_event(&mut self, event: &winit::event::WindowEvent) {
         match event {
             WindowEvent::Resized(size) => {
                 self.render_size = *size;
