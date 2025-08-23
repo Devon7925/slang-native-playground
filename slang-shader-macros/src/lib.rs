@@ -157,7 +157,7 @@ fn variable_reflection_to_type_data(binding: &VariableReflectionType) -> TypeDat
             });
             let struct_def = quote! {
                 #[repr(C)]
-                #[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+                #[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod, serde::Serialize, serde::Deserialize)]
                 pub struct #struct_ident {
                     #(#field_defs),*
                 }
