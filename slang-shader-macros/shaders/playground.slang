@@ -240,3 +240,8 @@ public struct playground_MODELAttribute
 {
     string path;
 };
+
+// Control a uniform with external data
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct playground_EXTERNAL_UNIFORMAttribute
+{};

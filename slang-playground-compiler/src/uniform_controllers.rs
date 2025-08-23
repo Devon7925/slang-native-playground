@@ -354,7 +354,7 @@ impl UniformControllerType for UniformExternal {
 
     #[cfg(feature = "compilation")]
     fn playground_name() -> String {
-        "EXTERNAL".to_string()
+        "EXTERNAL_UNIFORM".to_string()
     }
 
     #[cfg(feature = "compilation")]
