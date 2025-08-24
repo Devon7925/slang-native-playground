@@ -940,14 +940,14 @@ impl ResourceCommandData for ModelResourceCommand {
                 Self::playground_name(),
             )
         };
-        let VariableReflectionType::Struct(_, fields) = element_type else {
+        let VariableReflectionType::Struct { props, .. } = element_type else {
             panic!(
                 "{} attribute cannot be applied to {variable_name}, inner type must be struct",
                 Self::playground_name(),
             )
         };
         let mut field_types = vec![];
-        for (field_name, field) in fields {
+        for (field_name, field) in props {
             match field_name.as_str() {
                 "position" => {
                     if !matches!(

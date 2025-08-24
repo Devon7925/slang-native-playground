@@ -15,8 +15,9 @@ ron = { workspace = true }
 flume = { workspace = true }
 web-time = { workspace = true }
 futures = { workspace = true }
+once_cell = { workspace = true }
 slang-playground-compiler = { workspace = true }
-slang-shader-macros = { workspace = true }
+slang-shader-macros = { workspace = true, features = ["renderer-integration"]}
 slang-renderer = { workspace = true }
 
 [dependencies.egui-winit]

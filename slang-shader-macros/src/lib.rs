@@ -3,7 +3,9 @@ use std::path::Path;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use slang_playground_compiler::{
-    slang_compile::SlangCompiler, slang_reflector::{ScalarType, VariableReflectionType}, CompilationResult, UniformController
+    CompilationResult, UniformController,
+    slang_compile::SlangCompiler,
+    slang_reflector::{ScalarType, UserAttributeParameter, VariableReflectionType},
 };
 use syn::{
     LitStr, Token,
@@ -135,8 +137,12 @@ fn scalar_type_to_usage(slang_scalar_type: &ScalarType) -> proc_macro2::TokenStr
 
 fn variable_reflection_to_type_data(binding: &VariableReflectionType) -> TypeData {
     match binding {
-        VariableReflectionType::Struct(struct_name, items) => {
-            let (mut definitions, fields) = items
+        VariableReflectionType::Struct {
+            name: struct_name,
+            props,
+            user_attributes,
+        } => {
+            let (mut definitions, fields) = props
                 .iter()
                 .map(|(field_name, field_type)| {
                     let field_ident = format_ident!("{}", field_name);
@@ -151,12 +157,26 @@ fn variable_reflection_to_type_data(binding: &VariableReflectionType) -> TypeDat
                         (defs, fields)
                     },
                 );
+            let annotations = user_attributes
+                .iter()
+                .filter(|attr| attr.name == "playground_ANNOTATION")
+                .map(|attr| match &attr.parameters[..] {
+                    [UserAttributeParameter::String(annotation)] => annotation.clone(),
+                    _ => panic!("Invalid parameters for playground_ANNOTATION attribute"),
+                })
+                .map(|annotation| {
+                    let attribute: syn::Meta = syn::parse_str(&annotation).unwrap();
+                    attribute
+                })
+                .collect::<Vec<_>>();
+
             let struct_ident = format_ident!("{}", struct_name);
             let field_defs = fields.iter().map(|(field_ident, field_type)| {
                 quote! { pub #field_ident: #field_type }
             });
             let struct_def = quote! {
                 #[repr(C)]
+                #(#[#annotations])*
                 #[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod, serde::Serialize, serde::Deserialize)]
                 pub struct #struct_ident {
                     #(#field_defs),*
@@ -270,16 +290,26 @@ pub fn shader_module(input: TokenStream) -> TokenStream {
     let resource_bound_data = compilation_result
         .resource_commands
         .iter()
-        .filter_map(|(bind_name, cmd)| cmd.generate_binding().map(|binding| (bind_name.clone(), binding)))
+        .filter_map(|(bind_name, cmd)| {
+            cmd.generate_binding()
+                .map(|binding| (bind_name.clone(), binding))
+        })
         .map(|(name, binding)| (name, variable_reflection_to_type_data(&binding)))
         .collect::<Vec<_>>();
     let uniform_bound_data = compilation_result
         .uniform_controllers
         .iter()
-        .filter_map(|UniformController { name, controller, .. }| controller.generate_binding().map(|binding| (name.clone(), binding)))
+        .filter_map(
+            |UniformController {
+                 name, controller, ..
+             }| {
+                controller
+                    .generate_binding()
+                    .map(|binding| (name.clone(), binding))
+            },
+        )
         .map(|(name, binding)| (name, variable_reflection_to_type_data(&binding)))
         .collect::<Vec<_>>();
-    
 
     let renderer_integration = {
         #[cfg(not(feature = "renderer-integration"))]
@@ -313,8 +343,12 @@ pub fn shader_module(input: TokenStream) -> TokenStream {
         }
     };
 
-    let resource_definitions = resource_bound_data.into_iter().flat_map(|(_, data)| data.definitions);
-    let uniform_definitions = uniform_bound_data.into_iter().flat_map(|(_, data)| data.definitions);
+    let resource_definitions = resource_bound_data
+        .into_iter()
+        .flat_map(|(_, data)| data.definitions);
+    let uniform_definitions = uniform_bound_data
+        .into_iter()
+        .flat_map(|(_, data)| data.definitions);
 
     let result_tokens = compilation_result_tokens(compilation_result);
 

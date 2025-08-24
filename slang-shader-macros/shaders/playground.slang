@@ -245,3 +245,10 @@ public struct playground_MODELAttribute
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct playground_EXTERNAL_UNIFORMAttribute
 {};
+
+// Control a uniform with external data
+[__AttributeUsage(_AttributeTargets.Struct)]
+public struct playground_ANNOTATIONAttribute
+{
+    string annotation;
+};
