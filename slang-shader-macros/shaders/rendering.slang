@@ -1,4 +1,3 @@
-import user;
 import playground;
 
 [format("rgba8")]
@@ -12,21 +11,18 @@ Texture2D<float4> drawTexture;
 [playground::SAMPLER]
 SamplerState sampler;
 
-[shader("compute")]
-[numthreads(16, 16, 1)]
-[playground::CALL::SIZE_OF("outputTexture")]
-void imageMain(uint2 dispatchThreadID: SV_DispatchThreadID)
+void drawPixel(uint2 location, IFunc<float4> renderFunction)
 {
     uint width = 0;
     uint height = 0;
     outputTexture.GetDimensions(width, height);
 
-    float4 color = imageMain(dispatchThreadID.xy, int2(width, height));
+    float4 color = renderFunction();
 
-    if (dispatchThreadID.x >= width || dispatchThreadID.y >= height)
+    if (location.x >= width || location.y >= height)
         return;
 
-    outputTexture.Store(dispatchThreadID.xy, color);
+    outputTexture.Store(location, color);
 }
 
 struct Vertex

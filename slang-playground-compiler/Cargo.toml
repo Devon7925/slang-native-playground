@@ -12,7 +12,6 @@ winit = { workspace = true }
 web-time = { workspace = true }
 slang-reflector = { workspace = true, optional = true, features = ["derive-serde"]}
 url = { workspace = true }
-strum = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 image = { workspace = true }

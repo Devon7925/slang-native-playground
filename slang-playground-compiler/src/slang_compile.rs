@@ -1,31 +1,15 @@
 use std::collections::HashMap;
-use strum::{EnumIter, IntoEnumIterator};
 
 use slang_reflector::{
-    BoundParameter, BoundResource, EntrypointReflection, GlobalSession, ProgramLayoutReflector,
-    ProgramReflection, ResourceAccess, ScalarType, TextureType, UserAttributeParameter,
-    VariableReflection, VariableReflectionType, Downcast,
+    BoundParameter, BoundResource, Downcast, EntrypointReflection, GlobalSession,
+    ProgramLayoutReflector, ProgramReflection, ResourceAccess, ScalarType, TextureType,
+    UserAttributeParameter, VariableReflection, VariableReflectionType,
 };
 
 use crate::{
     CallCommand, CallCommandParameters, CompilationResult, DrawCommand, ResourceCommandData,
     UniformController, UniformControllerType, resource_commands::*, uniform_controllers::*,
 };
-
-#[derive(EnumIter, Debug, PartialEq, Clone)]
-enum ShaderType {
-    Image,
-    Print,
-}
-
-impl ShaderType {
-    fn get_entry_point_name(&self) -> &str {
-        match self {
-            ShaderType::Image => "imageMain",
-            ShaderType::Print => "printMain",
-        }
-    }
-}
 
 pub struct SlangCompiler {
     global_slang_session: GlobalSession,
@@ -55,13 +39,14 @@ impl Default for SlangCompiler {
         UniformColorPick::register(&mut default_controllers);
         UniformTime::register(&mut default_controllers);
         UniformFrameId::register(&mut default_controllers);
+        UniformScreenSize::register(&mut default_controllers);
         UniformMousePosition::register(&mut default_controllers);
         UniformDeltaTime::register(&mut default_controllers);
         UniformKeyInput::register(&mut default_controllers);
         UniformExternal::register(&mut default_controllers);
 
         let mut default_resource_commands = HashMap::new();
-        
+
         ExternalResourceCommand::register(&mut default_resource_commands);
         ZerosResourceCommand::register(&mut default_resource_commands);
         RandResourceCommand::register(&mut default_resource_commands);
@@ -117,16 +102,10 @@ impl SlangCompiler {
         for imported_file in used_files {
             let re = regex::Regex::new(":[0-9A-F]+$").unwrap();
             let file = re.replace(&imported_file, "").to_string();
-            
+
             let module = slang_session
                 .load_module(&file)
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "Failed to load module {}: {:?}",
-                        file,
-                        e.to_string()
-                    )
-                });
+                .unwrap_or_else(|e| panic!("Failed to load module {}: {:?}", file, e.to_string()));
 
             component_list.push(module.downcast().clone());
 
@@ -134,35 +113,6 @@ impl SlangCompiler {
                 component_list.push(entry_point.downcast().clone());
             }
         }
-
-        let program = slang_session
-            .create_composite_component_type(component_list)
-            .unwrap();
-        let linked_program = program.link().unwrap();
-        let shader_reflection = linked_program.layout(0).unwrap();
-
-        for st in ShaderType::iter().map(|st| st.get_entry_point_name().to_string()) {
-            if shader_reflection
-                .find_function_by_name(st.as_str())
-                .is_some()
-            {
-                let module = slang_session
-                    .load_module(format!("{}.slang", st).as_str())
-                    .unwrap_or_else(|e| {
-                        panic!("Failed to load module {}: {:?}", st, e.to_string())
-                    });
-
-                component_list.push(module.downcast().clone());
-
-                for entry_point in module.entry_points() {
-                    component_list.push(entry_point.downcast().clone());
-                }
-            }
-        }
-    }
-
-    fn is_runnable_entry_point(entry_point_name: &String) -> bool {
-        ShaderType::iter().any(|st| st.get_entry_point_name() == entry_point_name)
     }
 
     fn get_binding_descriptor(&self, parameter: &BoundResource) -> Option<wgpu::BindingType> {
@@ -396,21 +346,11 @@ impl SlangCompiler {
                 )
             });
 
-        let count = user_module.entry_point_count();
-        for i in 0..count {
-            let name = user_module
-                .entry_point_by_index(i)
-                .unwrap()
-                .function_reflection()
-                .name()
-                .unwrap()
-                .to_string();
-            if SlangCompiler::is_runnable_entry_point(&name) {
-                panic!("User defined playground entrypoint {}", name)
-            }
-        }
-        
-        self.add_components(&slang_session, user_module.dependency_file_paths().map(|p| p.to_string()), &mut components);
+        self.add_components(
+            &slang_session,
+            user_module.dependency_file_paths().map(|p| p.to_string()),
+            &mut components,
+        );
 
         let program = slang_session
             .create_composite_component_type(components.as_slice())

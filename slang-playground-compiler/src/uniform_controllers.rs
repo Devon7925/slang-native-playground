@@ -167,6 +167,93 @@ impl UniformControllerType for UniformMousePosition {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+pub enum RuntimeScalarType {
+    Float32,
+    Int32,
+    Uint32,
+}
+
+#[cfg(feature = "compilation")]
+impl TryFrom<&ScalarType> for RuntimeScalarType {
+    type Error = &'static str;
+
+    fn try_from(scalar_type: &ScalarType) -> Result<Self, Self::Error> {
+        match scalar_type {
+            ScalarType::Float32 => Ok(RuntimeScalarType::Float32),
+            ScalarType::Int32 => Ok(RuntimeScalarType::Int32),
+            ScalarType::Uint32 => Ok(RuntimeScalarType::Uint32),
+            _ => Err("Unsupported scalar type for RuntimeScalarType"),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct UniformScreenSize {
+    pub scalar: RuntimeScalarType,
+}
+
+#[typetag::serde]
+impl UniformControllerType for UniformScreenSize {
+    fn get_data(&self, uniform_source_data: &UniformSourceData) -> Vec<u8> {
+        match self.scalar {
+            RuntimeScalarType::Float32 => uniform_source_data
+                .window_size
+                .map(|c| c as f32)
+                .map(|c| c.to_le_bytes())
+                .concat(),
+            RuntimeScalarType::Int32 => uniform_source_data
+                .window_size
+                .map(|c| c as i32)
+                .map(|c| c.to_le_bytes())
+                .concat(),
+            RuntimeScalarType::Uint32 => uniform_source_data
+                .window_size
+                .map(|c| c as u32)
+                .map(|c| c.to_le_bytes())
+                .concat(),
+        }
+    }
+
+    #[cfg(feature = "compilation")]
+    fn playground_name() -> String {
+        "SCREEN_SIZE".to_string()
+    }
+
+    #[cfg(feature = "compilation")]
+    fn construct(
+        uniform_type: &VariableReflectionType,
+        _parameters: &[UserAttributeParameter],
+        variable_name: &str,
+    ) -> Box<dyn UniformControllerType> {
+        assert!(
+            matches!(
+                uniform_type,
+                VariableReflectionType::Vector(ScalarType::Float32, 2)
+                    | VariableReflectionType::Vector(ScalarType::Int32, 2)
+                    | VariableReflectionType::Vector(ScalarType::Uint32, 2)
+            ),
+            "{} attribute cannot be applied to {variable_name}, it only supports float2, int2 or uint2 vectors",
+            Self::playground_name()
+        );
+
+        let scalar = match uniform_type {
+            VariableReflectionType::Vector(scalar_type, 2) => scalar_type.try_into().unwrap_or_else(|err| {
+                panic!(
+                    "{} attribute cannot be applied to {variable_name}, it only supports float2, int2 or uint2 vectors: {err}",
+                    Self::playground_name()
+                )
+            }),
+            _ => panic!(
+                "{} attribute cannot be applied to {variable_name}, it only supports float2, int2 or uint2 vectors",
+                Self::playground_name()
+            ),
+        };
+
+        Box::new(UniformScreenSize { scalar })
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UniformTime;
 
 #[typetag::serde]

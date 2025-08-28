@@ -2,7 +2,7 @@
 
 A project to allow Slang playground shaders to run outside of a web environment. It bundles shaders in compilation for easy deployment/sharing.
 
-This is a library. See [slang-native-playground-example](https://github.com/Devon7925/slang-native-playground-example) for usage. Note `imageMain` and `printMain` are only available from files named `user.slang`.
+This is a library. See [slang-native-playground-example](https://github.com/Devon7925/slang-native-playground-example) for usage.
 
 Depends on [slang-rs](https://github.com/FloatyMonkey/slang-rs). See that repo if it is having trouble recognizing your version of Slang.
 

@@ -147,7 +147,8 @@ async fn process_resource_commands(
 
     if !uniform_controllers.is_empty() {
         let keys = HashSet::new();
-        let uniform_source_data = UniformSourceData::new(&keys);
+        let mut uniform_source_data = UniformSourceData::new(&keys);
+        uniform_source_data.window_size = [window_size.width, window_size.height];
         let Some(GPUResource::Buffer(buffer)) = allocated_resources.get("uniformInput") else {
             panic!("cannot get uniforms")
         };
@@ -579,6 +580,10 @@ impl Renderer {
             mouse_clicked: self.mouse_state.mouse_clicked,
             pressed_keys: &self.keyboard_state.pressed_keys,
             frame_count: self.frame_count,
+            window_size: [
+                self.render_size.width,
+                self.render_size.height,
+            ],
         };
 
         for UniformController {
@@ -759,7 +764,7 @@ impl Renderer {
             new_data,
         );
     }
-    
+
     pub fn update_uniform(&mut self, uniform_name: &str, new_data: &[u8]) {
         let mut uniform_components = self.uniform_components.borrow_mut();
         let Some(UniformController { controller, .. }) = uniform_components

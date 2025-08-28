@@ -3197,7 +3197,6 @@ dependencies = [
  "reqwest",
  "serde",
  "slang-reflector",
- "strum",
  "tobj",
  "typetag",
  "url",

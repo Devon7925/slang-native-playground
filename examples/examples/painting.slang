@@ -1,14 +1,8 @@
 import playground;
+import rendering;
 
 static const int MAX_BRUSH_SIZE = 64;
 static const float FLOAT_MAX_BRUSH_SIZE = 64.0;
-
-[playground::BLACK_SCREEN(1.0, 1.0)]
-RWTexture2D<float> tex_red;
-[playground::BLACK_SCREEN(1.0, 1.0)]
-RWTexture2D<float> tex_green;
-[playground::BLACK_SCREEN(1.0, 1.0)]
-RWTexture2D<float> tex_blue;
 
 [playground::ZEROS(8)]
 RWStructuredBuffer<uint> indirectBuffer;
@@ -21,6 +15,8 @@ float4 mousePosition;
 uniform float brush_size;
 [playground::COLOR_PICK(1.0, 0.0, 1.0)]
 uniform float3 color;
+[playground::SCREEN_SIZE]
+uniform int2 screenSize;
 
 [shader("compute")]
 [numthreads(thread_count, thread_count, 1)]
@@ -34,10 +30,8 @@ void draw(uint2 dispatchThreadId: SV_DispatchThreadID)
     if (length(offset) > brush_size / 2)
         return;
 
-    var mouse_pos = uint2(mousePosition.xy + offset);
-    tex_red[mouse_pos] = color.r;
-    tex_green[mouse_pos] = color.g;
-    tex_blue[mouse_pos] = color.b;
+    var mouse_pos = int2(0, screenSize.y) + int2(1, -1) * int2(mousePosition.xy + offset);
+    drawPixel(mouse_pos, () => float4(color, 1.0));
 }
 
 [shader("compute")]
