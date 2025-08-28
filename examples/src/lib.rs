@@ -1,7 +1,7 @@
 use slang_playground_compiler::CompilationResult;
 use slang_renderer::Renderer;
-use wgpu::Features;
 use std::sync::Arc;
+use wgpu::Features;
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -57,13 +57,19 @@ impl RenderData {
         let queue = Arc::new(queue);
 
         let state = Renderer::new(
-                compilation,
-                window.inner_size(),
-                device.clone(),
-                queue.clone(),
-            ).await;
+            compilation,
+            window.inner_size(),
+            device.clone(),
+            queue.clone(),
+        )
+        .await;
 
-        configure_surface(&surface, &device, window.inner_size(), wgpu::TextureFormat::Rgba8Unorm);
+        configure_surface(
+            &surface,
+            &device,
+            window.inner_size(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
 
         RenderData {
             state: state,
@@ -76,7 +82,12 @@ impl RenderData {
 }
 
 // Surface configuration is now handled externally if needed
-fn configure_surface(surface: &wgpu::Surface, device: &wgpu::Device, size: PhysicalSize<u32>, surface_format: wgpu::TextureFormat) {
+fn configure_surface(
+    surface: &wgpu::Surface,
+    device: &wgpu::Device,
+    size: PhysicalSize<u32>,
+    surface_format: wgpu::TextureFormat,
+) {
     let surface_config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format: surface_format,
@@ -91,8 +102,7 @@ fn configure_surface(surface: &wgpu::Surface, device: &wgpu::Device, size: Physi
             wgpu::PresentMode::Immediate
         },
     };
-    surface
-        .configure(device, &surface_config);
+    surface.configure(device, &surface_config);
 }
 
 struct App {
@@ -122,7 +132,8 @@ impl App {
             return;
         };
         render_data.state.begin_frame();
-        let surface_texture = render_data.surface
+        let surface_texture = render_data
+            .surface
             .get_current_texture()
             .expect("failed to acquire next swapchain texture");
         let texture_view = surface_texture
@@ -135,8 +146,12 @@ impl App {
             .device
             .create_command_encoder(&Default::default());
         render_data.state.run_compute_passes(&mut encoder);
-        render_data.state.run_draw_passes(&mut encoder, &texture_view);
+        render_data
+            .state
+            .run_draw_passes(&mut encoder, &texture_view);
         render_data.queue.submit([encoder.finish()]);
+        // Schedule a readback of the shader printf buffer, then process any available print output.
+        render_data.state.schedule_print_readback();
         render_data.state.handle_print_output();
         surface_texture.present();
     }
@@ -159,7 +174,10 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let compilation = self.compilation.take().expect("Compilation result is missing");
+        let compilation = self
+            .compilation
+            .take()
+            .expect("Compilation result is missing");
         #[allow(unused_mut)]
         let mut builder = Window::default_attributes().with_title("Slang Native Playground");
 
@@ -202,7 +220,12 @@ impl ApplicationHandler for App {
             let debug_state = pollster::block_on(DebugAppState::new(
                 event_loop,
                 (1360, 768),
-                self.render_data.as_ref().unwrap().state.uniform_components.clone(),
+                self.render_data
+                    .as_ref()
+                    .unwrap()
+                    .state
+                    .uniform_components
+                    .clone(),
             ));
             self.debug_app = Some(debug_state);
             self.render_data.as_ref().unwrap().window.focus_window();
@@ -248,7 +271,12 @@ impl ApplicationHandler for App {
         };
         match event {
             WindowEvent::Resized(size) => {
-                configure_surface(&render_data.surface, &render_data.device, size, self.surface_format);
+                configure_surface(
+                    &render_data.surface,
+                    &render_data.device,
+                    size,
+                    self.surface_format,
+                );
             }
             _ => (),
         }

@@ -8,6 +8,7 @@ use slang_playground_compiler::{
     ResourceCommandData, ResourceMetadata, UniformController, UniformSourceData, safe_set,
 };
 use wgpu::Extent3d;
+use wgpu::util::DeviceExt;
 
 use std::{
     borrow::Cow, cell::RefCell, collections::HashMap, panic, rc::Rc, sync::Arc, time::Duration,
@@ -170,12 +171,17 @@ async fn process_resource_commands(
     safe_set(
         &mut allocated_resources,
         "g_printedBuffer".to_string(),
-        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            mapped_at_creation: false,
-            size: PRINTF_BUFFER_SIZE as u64,
-            usage: wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_SRC),
-        })),
+        GPUResource::Buffer(
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                mapped_at_creation: false,
+                size: PRINTF_BUFFER_SIZE as u64,
+                // Allow host to read-from (COPY_SRC) and clear the buffer (COPY_DST)
+                usage: wgpu::BufferUsages::STORAGE
+                    .union(wgpu::BufferUsages::COPY_SRC)
+                    .union(wgpu::BufferUsages::COPY_DST),
+            }),
+        ),
     );
 
     safe_set(
@@ -386,25 +392,31 @@ fn parse_printf_buffer(
     let element_size_in_words = buffer_element_size / 4;
     let mut out_str_arry: Vec<String> = vec![];
     let mut format_string = "".to_string();
+    let mut in_entry = false;
     for element_index in 0..number_elements {
         let offset = element_index * element_size_in_words;
-        match printf_buffer_array[offset] {
-            1 => {
-                // format string
+        let t = printf_buffer_array[offset];
+        // Only start processing when we see a format string (type 1). This makes the parser
+        // tolerant of empty buffers and unused slots.
+        if !in_entry {
+            if t == 1 {
+                in_entry = true;
                 format_string = hashed_strings
                     .get(&printf_buffer_array[offset + 1])
                     .unwrap()
                     .clone();
-                // low field
             }
+            continue;
+        }
+
+        match t {
             2 => {
                 // normal string
-                data_array.push(
-                    hashed_strings
-                        .get(&printf_buffer_array[offset + 1])
-                        .unwrap()
-                        .clone(),
-                ); // low field
+                if let Some(s) = hashed_strings.get(&printf_buffer_array[offset + 1]) {
+                    data_array.push(s.clone());
+                } else {
+                    data_array.push("<undef>".to_string());
+                }
             }
             3 => {
                 // integer
@@ -420,23 +432,25 @@ fn parse_printf_buffer(
                 data_array.push(0.to_string()); // low field
             }
             0xFFFFFFFF => {
-                let parsed_tokens = parse_printf_format(format_string);
+                // end of entry
+                let parsed_tokens = parse_printf_format(format_string.clone());
                 let output = format_printf_string(&parsed_tokens, &data_array);
                 out_str_arry.push(output);
+                // reset state
                 format_string = "".to_string();
                 data_array = vec![];
+                in_entry = false;
+                // if the next slot isn't a new format string then we're done
                 if element_index < number_elements - 1 {
                     let next_offset = offset + element_size_in_words;
-                    // advance to the next element to see if it's a format string, if it's not we just early return
-                    // the results, otherwise just continue processing.
-                    if printf_buffer_array[next_offset] != 1
-                    // type field
-                    {
+                    if printf_buffer_array[next_offset] != 1 {
                         return out_str_arry;
                     }
                 }
             }
-            _ => panic!("Invalid format type!"),
+            _ => {
+                // Unknown/garbage type while in an entry: ignore to be tolerant of uninitialised data.
+            }
         }
     }
 
@@ -580,10 +594,7 @@ impl Renderer {
             mouse_clicked: self.mouse_state.mouse_clicked,
             pressed_keys: &self.keyboard_state.pressed_keys,
             frame_count: self.frame_count,
-            window_size: [
-                self.render_size.width,
-                self.render_size.height,
-            ],
+            window_size: [self.render_size.width, self.render_size.height],
         };
 
         for UniformController {
@@ -714,6 +725,46 @@ impl Renderer {
         drop(pass);
     }
 
+    /// Schedule a GPU copy from the device printf buffer to the host-read buffer and
+    /// arrange to be notified when the read buffer is mappable. This sets `print_receiver`.
+    pub fn schedule_print_readback(&mut self) {
+        // If we already have a pending print_receiver, don't schedule another readback.
+        if self.print_receiver.is_some() {
+            return;
+        }
+
+        let Some(GPUResource::Buffer(device_buffer)) =
+            self.allocated_resources.get("g_printedBuffer")
+        else {
+            return;
+        };
+        let Some(GPUResource::Buffer(read_buffer)) =
+            self.allocated_resources.get("printfBufferRead")
+        else {
+            return;
+        };
+
+        // Create an encoder, copy the buffer, and submit it immediately.
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("printf copy encoder"),
+            });
+        encoder.copy_buffer_to_buffer(device_buffer, 0, read_buffer, 0, PRINTF_BUFFER_SIZE as u64);
+        self.queue.submit([encoder.finish()]);
+
+        // Create a oneshot channel and map the read buffer. When mapping completes the sender
+        // will be signalled and handle_print_output will be able to read the mapped contents.
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        let slice = read_buffer.slice(..);
+        // Move the sender into the callback; ignore the result (if receiver was dropped)
+        slice.map_async(wgpu::MapMode::Read, move |_res| {
+            let _ = sender.send(());
+        });
+
+        self.print_receiver = Some(receiver);
+    }
+
     /// Optionally handle print buffer output after frame submission
     pub fn handle_print_output(&mut self) {
         if let Some(receiver) = self.print_receiver.as_mut() {
@@ -744,6 +795,34 @@ impl Renderer {
                 print_received = true;
             }
             if print_received {
+                // Clear the device-side printed buffer so repeated readbacks don't re-print the same data.
+                if let Some(GPUResource::Buffer(device_buffer)) =
+                    self.allocated_resources.get("g_printedBuffer")
+                {
+                    // Create a temporary zeroed buffer and copy it over the device buffer.
+                    let zeros = vec![0u8; PRINTF_BUFFER_SIZE];
+                    let temp = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("printf zeros"),
+                            contents: &zeros,
+                            usage: wgpu::BufferUsages::COPY_SRC,
+                        });
+                    let mut encoder =
+                        self.device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("clear printf buffer"),
+                            });
+                    encoder.copy_buffer_to_buffer(
+                        &temp,
+                        0,
+                        device_buffer,
+                        0,
+                        PRINTF_BUFFER_SIZE as u64,
+                    );
+                    self.queue.submit([encoder.finish()]);
+                }
+
                 self.print_receiver = None;
             }
         }

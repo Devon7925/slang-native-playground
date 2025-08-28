@@ -6,5 +6,5 @@ fn main() {
 }
 
 mod annotation_test {
-    slang_shader_macros::shader_module!("user.slang", ["examples/examples/annotation"]);
+    slang_shader_macros::shader_module!("annotation.slang", ["examples/examples"]);
 }
