@@ -65,7 +65,8 @@ pub struct Renderer {
     mouse_state: MouseState,
     keyboard_state: KeyboardState,
     render_size: PhysicalSize<u32>,
-    print_receiver: Option<futures::channel::oneshot::Receiver<()>>,
+    print_receivers: [Option<futures::channel::oneshot::Receiver<()>>; 2],
+    next_print_read_index: usize,
     first_frame: bool,
     delta_time: f32,
     last_frame_time: web_time::Instant,
@@ -187,6 +188,19 @@ async fn process_resource_commands(
     safe_set(
         &mut allocated_resources,
         "printfBufferRead".to_string(),
+        GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            mapped_at_creation: false,
+            size: PRINTF_BUFFER_SIZE as u64,
+            usage: wgpu::BufferUsages::MAP_READ.union(wgpu::BufferUsages::COPY_DST),
+        })),
+    );
+
+    // Create an additional read buffer to allow one buffer to be mapped while another is used
+    // for a new copy. This helps avoid dropping prints if mappings are still in flight.
+    safe_set(
+        &mut allocated_resources,
+        "printfBufferRead1".to_string(),
         GPUResource::Buffer(device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             mapped_at_creation: false,
@@ -563,7 +577,8 @@ impl Renderer {
             },
             keyboard_state: KeyboardState::new(),
             render_size,
-            print_receiver: None,
+            print_receivers: [None, None],
+            next_print_read_index: 0,
             first_frame: true,
             delta_time: 0.0,
             last_frame_time: web_time::Instant::now(),
@@ -739,8 +754,8 @@ impl Renderer {
     /// Schedule a GPU copy from the device printf buffer to the host-read buffer and
     /// arrange to be notified when the read buffer is mappable. This sets `print_receiver`.
     pub fn schedule_print_readback(&mut self) {
-        // If we already have a pending print_receiver, don't schedule another readback.
-        if self.print_receiver.is_some() {
+        // Find a free read slot. If both receivers are occupied, don't schedule a new readback.
+        if self.print_receivers.iter().all(|r| r.is_some()) {
             return;
         }
 
@@ -749,8 +764,13 @@ impl Renderer {
         else {
             return;
         };
-        let Some(GPUResource::Buffer(read_buffer)) =
-            self.allocated_resources.get("printfBufferRead")
+        // Choose a read buffer to copy into (rotate between the two read buffers).
+        let read_buffer_name = if self.next_print_read_index == 0 {
+            "printfBufferRead"
+        } else {
+            "printfBufferRead1"
+        };
+        let Some(GPUResource::Buffer(read_buffer)) = self.allocated_resources.get(read_buffer_name)
         else {
             return;
         };
@@ -761,80 +781,76 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("printf copy encoder"),
             });
+
+        // Copy device-side printf buffer into the host-read buffer so we can map it.
         encoder.copy_buffer_to_buffer(device_buffer, 0, read_buffer, 0, PRINTF_BUFFER_SIZE as u64);
+
+        // Immediately clear the device-side printf buffer by copying from a zeroed temporary buffer.
+        // Doing this now ensures subsequent frames can write into the buffer without being
+        // overwritten later when the previous readback completes.
+        let zeros = vec![0u8; PRINTF_BUFFER_SIZE];
+        let temp = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("printf zeros"),
+                contents: &zeros,
+                usage: wgpu::BufferUsages::COPY_SRC,
+            });
+        encoder.copy_buffer_to_buffer(&temp, 0, device_buffer, 0, PRINTF_BUFFER_SIZE as u64);
+
         self.queue.submit([encoder.finish()]);
 
         // Create a oneshot channel and map the read buffer. When mapping completes the sender
         // will be signalled and handle_print_output will be able to read the mapped contents.
         let (sender, receiver) = futures::channel::oneshot::channel();
         let slice = read_buffer.slice(..);
+        let idx = self.next_print_read_index;
         // Move the sender into the callback; ignore the result (if receiver was dropped)
         slice.map_async(wgpu::MapMode::Read, move |_res| {
             let _ = sender.send(());
         });
 
-        self.print_receiver = Some(receiver);
+        // Store the receiver in the slot and advance the index for the next schedule.
+        self.print_receivers[idx] = Some(receiver);
+        self.next_print_read_index = (self.next_print_read_index + 1) % 2;
     }
 
     /// Optionally handle print buffer output after frame submission
     pub fn handle_print_output(&mut self) {
-        if let Some(receiver) = self.print_receiver.as_mut() {
-            let mut print_received = false;
-            if let Ok(Some(_)) = receiver.try_recv() {
-                let Some(GPUResource::Buffer(printf_buffer_read)) =
-                    self.allocated_resources.get("printfBufferRead")
-                else {
-                    panic!("printfBufferRead is incorrect type or doesn't exist");
-                };
+        // Check each receiver slot for completion and handle any that are ready.
+        for idx in 0..self.print_receivers.len() {
+            if let Some(receiver) = self.print_receivers[idx].as_mut() {
+                if let Ok(Some(_)) = receiver.try_recv() {
+                    let read_buffer_name = if idx == 0 {
+                        "printfBufferRead"
+                    } else {
+                        "printfBufferRead1"
+                    };
+                    let Some(GPUResource::Buffer(printf_buffer_read)) =
+                        self.allocated_resources.get(read_buffer_name)
+                    else {
+                        panic!("{} is incorrect type or doesn't exist", read_buffer_name);
+                    };
 
-                let format_print = parse_printf_buffer(
-                    &self.hashed_strings,
-                    &printf_buffer_read,
-                    PRINTF_BUFFER_ELEMENT_SIZE,
-                );
-
-                if !format_print.is_empty() {
-                    let result = format!("Shader Output:\n{}\n", format_print.join(""));
-                    #[cfg(not(target_arch = "wasm32"))]
-                    print!("{}", result);
-                    #[cfg(target_arch = "wasm32")]
-                    web_sys::console::log_1(&result.into())
-                }
-
-                printf_buffer_read.unmap();
-
-                print_received = true;
-            }
-            if print_received {
-                // Clear the device-side printed buffer so repeated readbacks don't re-print the same data.
-                if let Some(GPUResource::Buffer(device_buffer)) =
-                    self.allocated_resources.get("g_printedBuffer")
-                {
-                    // Create a temporary zeroed buffer and copy it over the device buffer.
-                    let zeros = vec![0u8; PRINTF_BUFFER_SIZE];
-                    let temp = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("printf zeros"),
-                            contents: &zeros,
-                            usage: wgpu::BufferUsages::COPY_SRC,
-                        });
-                    let mut encoder =
-                        self.device
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("clear printf buffer"),
-                            });
-                    encoder.copy_buffer_to_buffer(
-                        &temp,
-                        0,
-                        device_buffer,
-                        0,
-                        PRINTF_BUFFER_SIZE as u64,
+                    let format_print = parse_printf_buffer(
+                        &self.hashed_strings,
+                        &printf_buffer_read,
+                        PRINTF_BUFFER_ELEMENT_SIZE,
                     );
-                    self.queue.submit([encoder.finish()]);
-                }
 
-                self.print_receiver = None;
+                    if !format_print.is_empty() {
+                        let result = format!("Shader Output:\n{}\n", format_print.join(""));
+                        #[cfg(not(target_arch = "wasm32"))]
+                        print!("{}", result);
+                        #[cfg(target_arch = "wasm32")]
+                        web_sys::console::log_1(&result.into())
+                    }
+
+                    printf_buffer_read.unmap();
+
+                    // Clear the receiver slot
+                    self.print_receivers[idx] = None;
+                }
             }
         }
     }
