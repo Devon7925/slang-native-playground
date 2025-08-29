@@ -319,7 +319,7 @@ impl UniformControllerType for UniformFrameId {
             Self::playground_name()
         );
 
-        Box::new(UniformTime)
+        Box::new(UniformFrameId)
     }
 }
 
