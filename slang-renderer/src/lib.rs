@@ -254,7 +254,7 @@ fn parse_printf_format(format_string: String) -> Vec<FormatSpecifier> {
     format_specifiers
 }
 
-fn format_printf_string(parsed_tokens: &[FormatSpecifier], data: &[String]) -> String {
+fn format_printf_string(parsed_tokens: &[FormatSpecifier], data: &[FormatFillValue]) -> String {
     let mut data_index = 0;
 
     parsed_tokens
@@ -267,7 +267,7 @@ fn format_printf_string(parsed_tokens: &[FormatSpecifier], data: &[String]) -> S
                 precision,
                 specifier_type,
             } => {
-                let value = data[data_index].clone();
+                let value = &data[data_index];
                 data_index += 1;
                 format_specifier(value, flags, width, precision, specifier_type)
             }
@@ -278,7 +278,7 @@ fn format_printf_string(parsed_tokens: &[FormatSpecifier], data: &[String]) -> S
 
 // Helper function to format each specifier
 fn format_specifier(
-    value: String,
+    value: &FormatFillValue,
     flags: &str,
     width: &Option<usize>,
     precision: &Option<usize>,
@@ -287,59 +287,59 @@ fn format_specifier(
     let mut formatted_value;
     let was_precision_specified = precision.is_some();
     let precision = precision.unwrap_or(6); //eww magic number
-    match specifier_type {
-        "d" | "i" => {
+    match (specifier_type, value) {
+        ("d" | "i", FormatFillValue::Integer(int_val)) => {
             // Integer (decimal)
-            formatted_value = value.parse::<i32>().unwrap().to_string();
+            formatted_value = (*int_val as i32).to_string();
         }
-        "u" => {
+        ("u", FormatFillValue::Integer(int_val)) => {
             // Unsigned integer
-            formatted_value = value.parse::<u32>().unwrap().to_string();
+            formatted_value = int_val.to_string();
         }
-        "o" => {
+        ("o", FormatFillValue::Integer(int_val)) => {
             // Octal
-            formatted_value = format!("{:o}", value.parse::<u32>().unwrap());
+            formatted_value = format!("{:o}", int_val);
         }
-        "x" => {
+        ("x", FormatFillValue::Integer(int_val)) => {
             // Hexadecimal (lowercase)
-            formatted_value = format!("{:x}", value.parse::<u32>().unwrap());
+            formatted_value = format!("{:x}", int_val);
         }
-        "X" => {
+        ("X", FormatFillValue::Integer(int_val)) => {
             // Hexadecimal (uppercase)
-            formatted_value = format!("{:X}", value.parse::<u32>().unwrap());
+            formatted_value = format!("{:X}", int_val);
         }
-        "f" | "F" => {
+        ("f" | "F", FormatFillValue::Float(float_val)) => {
             // Floating-point
-            formatted_value = format!("{:.1$}", value.parse::<f32>().unwrap(), precision);
+            formatted_value = format!("{:.1$}", float_val, precision);
         }
-        "e" => {
+        ("e", FormatFillValue::Float(float_val)) => {
             // Scientific notation (lowercase)
-            formatted_value = format!("{:.1$}e", value.parse::<f32>().unwrap(), precision);
+            formatted_value = format!("{:.1$}e", float_val, precision);
         }
-        "E" => {
+        ("E", FormatFillValue::Float(float_val)) => {
             // Scientific notation (uppercase)
-            formatted_value = format!("{:.1$}E", value.parse::<f32>().unwrap(), precision);
+            formatted_value = format!("{:.1$}E", float_val, precision);
         }
-        "g" | "G" => {
+        ("g" | "G", FormatFillValue::Float(float_val)) => {
             // Shortest representation of floating-point
-            formatted_value = format!("{:.1$}", value.parse::<f32>().unwrap(), precision);
+            formatted_value = format!("{:.1$}", float_val, precision);
         }
-        "c" => {
+        ("c", FormatFillValue::Integer(int_val)) => {
             // Character
-            formatted_value = String::from(value.parse::<u8>().unwrap() as char);
+            formatted_value = String::from(*int_val as u8 as char);
         }
-        "s" => {
+        ("s", FormatFillValue::String(str_val)) => {
             // String
-            formatted_value = value.clone();
+            formatted_value = str_val.clone();
             if was_precision_specified {
                 formatted_value = formatted_value[0..precision].to_string();
             }
         }
-        "%" => {
+        ("%", _) => {
             // Literal "%"
             return "%".to_string();
         }
-        st => panic!("Unsupported specifier: {}", st),
+        (st, _) => panic!("Unsupported specifier: {}", st),
     }
 
     // Handle width and flags (like zero-padding, space, left alignment, sign)
@@ -349,10 +349,15 @@ fn format_specifier(
         } else {
             ' '
         };
+        let float_val = match value {
+            FormatFillValue::Float(f) => f,
+            FormatFillValue::Integer(i) => &(*i as f32),
+            _ => panic!("Expected a numeric value"),
+        };
         let is_left_aligned = flags.contains('-');
-        let needs_sign = flags.contains('+') && value.parse::<f32>().unwrap() >= 0.0;
+        let needs_sign = flags.contains('+') && *float_val >= 0.0;
         let needs_space =
-            flags.contains(' ') && !needs_sign && value.parse::<f32>().unwrap() >= 0.0;
+            flags.contains(' ') && !needs_sign && *float_val >= 0.0;
 
         if needs_sign {
             formatted_value = format!("+{formatted_value}");
@@ -375,6 +380,12 @@ fn format_specifier(
     formatted_value
 }
 
+enum FormatFillValue {
+    String(String),
+    Integer(u32),
+    Float(f32),
+}
+
 fn parse_printf_buffer(
     hashed_strings: &HashMap<u32, String>,
     printf_value_resource: &wgpu::Buffer,
@@ -388,7 +399,7 @@ fn parse_printf_buffer(
 
     // TODO: We currently doesn't support 64-bit data type (e.g. uint64_t, int64_t, double, etc.)
     // so 32-bit array should be able to contain everything we need.
-    let mut data_array = vec![];
+    let mut data_array: Vec<FormatFillValue> = vec![];
     let element_size_in_words = buffer_element_size / 4;
     let mut out_str_arry: Vec<String> = vec![];
     let mut format_string = "".to_string();
@@ -413,23 +424,23 @@ fn parse_printf_buffer(
             2 => {
                 // normal string
                 if let Some(s) = hashed_strings.get(&printf_buffer_array[offset + 1]) {
-                    data_array.push(s.clone());
+                    data_array.push(FormatFillValue::String(s.clone()));
                 } else {
-                    data_array.push("<undef>".to_string());
+                    data_array.push(FormatFillValue::String("<undef>".to_string()));
                 }
             }
             3 => {
                 // integer
-                data_array.push(printf_buffer_array[offset + 1].to_string()); // low field
+                data_array.push(FormatFillValue::Integer(printf_buffer_array[offset + 1])); // low field
             }
             4 => {
                 // float
                 let float_data = f32::from_bits(printf_buffer_array[offset + 1]);
-                data_array.push(float_data.to_string()); // low field
+                data_array.push(FormatFillValue::Float(float_data)); // low field
             }
             5 => {
                 // TODO: We can't handle 64-bit data type yet.
-                data_array.push(0.to_string()); // low field
+                data_array.push(FormatFillValue::Integer(0)); // low field
             }
             0xFFFFFFFF => {
                 // end of entry
