@@ -10,9 +10,6 @@ mod wasm_workaround {
 }
 
 fn main() {
-    // https://github.com/rustwasm/wasm-bindgen/issues/4446
-    #[cfg(target_family = "wasm")]
-    unsafe { wasm_workaround::__wasm_call_ctors()};
     let compilation: CompilationResult = compile_shader!("simple_print.slang", ["examples/examples"]);
     launch(compilation);
 }
